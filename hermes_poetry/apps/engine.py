@@ -45,16 +45,28 @@ class Engine:
             for m in g["members"]:
                 if len(m) == 1:
                     self._erya_index.setdefault(t2s(m), []).append(i)
+        self._load_external_bindings()
+        try:
+            self.manifest = json.loads((config.MANIFEST_DIR / "corpus_manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.manifest = {}
+
+    def _load_external_bindings(self) -> None:
+        """D层绑定表：流水线单独落盘的小文件，免于全量扫描 initial_rules。"""
         self._ext_by_poem: Dict[str, Dict] = {}
+        bindings = read_jsonl(config.RULES_INITIAL_DIR / "external_bindings.jsonl")
+        if bindings:
+            for b in bindings:
+                ext = self.external.get(str(b.get("external_id", "")))
+                if ext:
+                    self._ext_by_poem[b["poem_id"]] = ext
+            return
+        # 兼容旧资产：回退全量扫描
         for r in read_jsonl(config.RULES_INITIAL_DIR / "initial_rules.jsonl"):
             if r.get("rule_type") == "external_analysis_rule":
                 ext = self.external.get(str(r["if_conditions"].get("external_id", "")))
                 if ext:
                     self._ext_by_poem[r["poem_id"]] = ext
-        try:
-            self.manifest = json.loads((config.MANIFEST_DIR / "corpus_manifest.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            self.manifest = {}
 
     @staticmethod
     def _corpus_fingerprint() -> str:
@@ -78,11 +90,15 @@ class Engine:
         hits = self.rag.search(f"《{title}》", top_k=1)
         if hits and hits[0]["match_source"] == "direct_title":
             return self.by_id[hits[0]["poem_id"]]
-        # 模糊题名回退：语料题名常带组诗编号（如「月下獨酌四首 一」）
+        # 模糊题名回退：语料题名常带组诗编号（如「月下獨酌四首 一」）。
+        # 前缀匹配优先；子串包含仅限 ≥3 字查询（短语/人名误解析防线）
         title_s = t2s(title)
         if len(title_s) >= 2:
             prefix_matches = [ps[0] for ts, ps in self.rag._title_index.items()
-                              if ts.startswith(title_s) or title_s in ts]
+                              if ts.startswith(title_s)]
+            if not prefix_matches and len(title_s) >= 3:
+                prefix_matches = [ps[0] for ts, ps in self.rag._title_index.items()
+                                  if title_s in ts]
             if prefix_matches:
                 curated = [p for p in prefix_matches
                            if p.source in ("TANG300", "SONGCI300", "QIANJIA") or p.also_in]
@@ -107,8 +123,21 @@ class Engine:
     # ── 情境荐诗 ─────────────────────────────────────────────────
     def match(self, mood: str = "", imagery: Optional[List[str]] = None,
               themes: Optional[List[str]] = None, top_k: int = 6) -> Dict:
-        want_imagery = list(imagery or [])
-        want_themes = list(themes or [])
+        # 用户传入的意象/题材先归一：表面形式（明月）→规范名（月）、
+        # 题材简称（思乡）→全名（思乡羁旅）
+        surface_to_canon = {t2s(s): c for s, c in IMAGERY_SURFACE}
+        want_imagery = []
+        for x in imagery or []:
+            xs = t2s((x or "").strip())
+            canon = xs if xs in IMAGERY else surface_to_canon.get(xs, "")
+            if canon and canon not in want_imagery:
+                want_imagery.append(canon)
+        want_themes = []
+        for x in themes or []:
+            xs = t2s((x or "").strip())
+            full = next((th for th in THEMES if xs == th or (len(xs) >= 2 and xs in th)), "")
+            if full and full not in want_themes:
+                want_themes.append(full)
         want_emotions: List[str] = []
         folded = t2s(mood or "")
         for key, hint in MOOD_HINTS.items():
@@ -198,9 +227,9 @@ class Engine:
     # ── 教学 ─────────────────────────────────────────────────────
     def teach(self, topic: str) -> Dict:
         topic_s = t2s((topic or "").strip())
-        # 题材教学
+        # 题材教学（支持简称：思乡/送别/怀古/边塞……）
         for theme, prof in self.theme_profiles.items():
-            if theme in topic_s or topic_s == theme:
+            if theme in topic_s or (len(topic_s) >= 2 and topic_s in theme):
                 reps = [{**e, "author": self.by_id[e["poem_id"]].author if e["poem_id"] in self.by_id else ""}
                         for e in prof.get("example_evidence", [])[:6]]
                 return {"lesson": {

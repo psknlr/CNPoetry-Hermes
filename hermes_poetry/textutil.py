@@ -17,8 +17,12 @@ from typing import Dict, List, Tuple
 
 from . import config
 
-RE_CJK = re.compile(r"[㐀-鿿]")
-RE_SENT_SPLIT = re.compile(r"[，。、；：？！,.;:?!\s「」『』〈〉《》（）()\[\]【】·]+")
+# 覆盖基本区 + 扩展A + 兼容区 + 扩展B-I（OpenCC 部分简体目标与语料生僻字
+# 落在扩展 B+ 区；范围不全会让折叠/去标点静默丢字，击穿逐字回源闸门）
+RE_CJK = re.compile(r"[㐀-鿿豈-﫿\U00020000-\U0003134F]")
+# 断句符不含括号引号：小注（校勘/夹注）由 strip_brackets 先行剥离，
+# 括号若参与断句会把注文切成伪「诗行」污染计量层
+RE_SENT_SPLIT = re.compile(r"[，。、；：？！,.;:?!\s·]+")
 
 
 def cjk_chars(text: str) -> List[str]:
@@ -71,7 +75,9 @@ def _t2s_table() -> Dict[int, str]:
                 continue
             trad, simp_alts = parts[0], parts[1].split()
             if len(trad) == 1 and simp_alts and len(simp_alts[0]) == 1:
-                if trad != simp_alts[0]:
+                # 双保险：映射目标必须仍在 RE_CJK 覆盖内，否则跳过该映射
+                # （目标丢出 CJK 范围会被 content_only 删字，制造证据假阳性）
+                if trad != simp_alts[0] and RE_CJK.match(simp_alts[0]):
                     table[ord(trad)] = simp_alts[0]
     except OSError:
         pass
@@ -90,15 +96,6 @@ _VARIANT_MAP = str.maketrans({
 def t2s(text: str) -> str:
     """繁→简折叠（长度不变）。语料索引与查询归一的统一入口。"""
     return (text or "").translate(_t2s_table()).translate(_VARIANT_MAP)
-
-
-@lru_cache(maxsize=1)
-def _s2t_pairs() -> Dict[str, str]:
-    """简→繁展示映射（由 t2s 表反转；一简对多繁时保留首见）。"""
-    rev: Dict[str, str] = {}
-    for k, v in _t2s_table().items():
-        rev.setdefault(v, chr(k))
-    return rev
 
 
 def normalize_query(text: str) -> str:
@@ -125,12 +122,13 @@ def split_lines(paragraphs: List[str]) -> List[str]:
     """把语料段落切分为句（诗行）。
 
     chinese-poetry 的一个 paragraph 常含两句（如「春眠不覺曉，處處聞啼鳥。」），
-    句是格律计量与证据定位的原子单位。
+    句是格律计量与证据定位的原子单位。先剥离括注小注再断句，
+    避免校勘文字被切成伪「诗行」。
     """
     lines: List[str] = []
     for para in paragraphs or []:
-        for piece in RE_SENT_SPLIT.split(para or ""):
-            piece = piece.strip()
+        for piece in RE_SENT_SPLIT.split(strip_brackets(para or "")):
+            piece = piece.strip("「」『』〈〉《》【】")
             if piece:
                 lines.append(piece)
     return lines

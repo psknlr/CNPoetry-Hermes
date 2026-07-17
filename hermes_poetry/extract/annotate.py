@@ -51,8 +51,9 @@ def annotate_line(line: str, line_idx: int) -> LineHits:
     # 意象先占位（多为名词性，优先级高）
     for canon, surface, idx in _match_terms(folded, IMAGERY_SURFACE, taken):
         out.imagery.append((canon, surface))
-    # 情感标记：单独掩码（同一字可同时是意象与情感语境的一部分时，意象优先）
-    taken_e = list(taken)
+    # 情感标记：独立掩码——意象与情感是两个正交维度，共享掩码会让
+    # 单字意象「云」吃掉更长的情感标记「凌云」（违背最长优先）
+    taken_e = [False] * len(folded)
     for cat, marker, idx in _match_terms(folded, EMOTION_SURFACE, taken_e):
         if idx > 0 and folded[idx - 1] in NEGATION_PREFIX:
             out.negated_emotions.append((cat, marker))

@@ -60,6 +60,12 @@ def run_pipeline(verbose: bool = True) -> Dict:
     review = ReviewPipeline(store)
     accepted, rejected = review.run(rules)
     review.persist(accepted, rejected)
+    # D层绑定表单独落盘（Engine 直读，免于全量扫描规则库）
+    from .schemas import write_jsonl as _write_jsonl
+    _write_jsonl(config.RULES_INITIAL_DIR / "external_bindings.jsonl", [
+        {"poem_id": r.poem_id, "external_id": str(r.if_conditions.get("external_id", ""))}
+        for r in accepted if r.rule_type == "external_analysis_rule"
+    ])
     log(f"  通过 {len(accepted)} 条，拒绝 {len(rejected)} 条，审计 {len(review.audits)} 条")
 
     log("[5/8] 语料落盘（poems + manifest）…")

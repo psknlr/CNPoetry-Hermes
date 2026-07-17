@@ -21,9 +21,12 @@ from ..textutil import content_only, split_lines, t2s
 from . import sources as src
 
 
-def _dedup_key(author: str, paragraphs: List[str]) -> str:
-    body = content_only(t2s("".join(paragraphs)))[:12]
-    return f"{content_only(t2s(author))}|{body}"
+def _fold_body(paragraphs: List[str]) -> str:
+    return content_only(t2s("".join(paragraphs)))
+
+
+def _dedup_key(author: str, body: str) -> str:
+    return f"{content_only(t2s(author))}|{body[:12]}"
 
 
 def build_poems(verbose: bool = True) -> Tuple[List[Poem], Dict]:
@@ -38,19 +41,38 @@ def build_poems(verbose: bool = True) -> Tuple[List[Poem], Dict]:
         raw_count = 0
         for rec in src.iter_source(spec):
             raw_count += 1
-            dk = _dedup_key(rec["author"], rec["paragraphs"])
-            if dk in seen and len(dk) > 8:  # 键太短（极短诗）不参与去重
-                keep = seen[dk]
-                if rec["book"] not in keep.also_in and rec["book"] != keep.book:
-                    keep.also_in.append(rec["book"])
-                keep.tags.extend(t for t in rec["tags"] if t not in keep.tags)
-                keep.notes.extend(n for n in rec["notes"] if n not in keep.notes)
-                if rec["appreciation"] and not keep.appreciation:
-                    keep.appreciation = rec["appreciation"]
-                if rec.get("genre_tag") and "genre_tag" not in keep.tags:
-                    keep.tags.append(rec["genre_tag"])
-                merged_dups += 1
-                continue
+            body = _fold_body(rec["paragraphs"])
+            dk = _dedup_key(rec["author"], body)
+            # 前缀碰撞≠重出：全文互为前缀（节选 vs 全篇）才合并，保留较长文本；
+            # 仅开头相同的不同诗（组诗单首/同题异篇）一律并存。极短诗不参与去重。
+            keep = seen.get(dk) if len(body) >= 8 else None
+            if keep is not None:
+                keep_body = content_only(t2s(keep.text))
+                same_family = keep_body.startswith(body) or body.startswith(keep_body)
+                if same_family:
+                    if len(body) > len(keep_body):
+                        # 后见记录是更完整版本：升级保留方的原文层
+                        if keep.book not in keep.also_in:
+                            keep.also_in.append(keep.book + "（节选）")
+                        keep.lines = split_lines(rec["paragraphs"])
+                        keep.text = "\n".join(rec["paragraphs"])
+                        keep.sha256 = hashlib.sha256(keep.text.encode("utf-8")).hexdigest()
+                    if rec["book"] not in keep.also_in and rec["book"] != keep.book:
+                        keep.also_in.append(rec["book"])
+                    keep.tags.extend(t for t in rec["tags"] if t not in keep.tags)
+                    keep.notes.extend(n for n in rec["notes"] if n not in keep.notes)
+                    if rec["appreciation"] and not keep.appreciation:
+                        keep.appreciation = rec["appreciation"]
+                    gt = rec.get("genre_tag")
+                    if gt and gt not in keep.tags:
+                        keep.tags.append(gt)
+                    merged_dups += 1
+                    continue
+                # 非同族：换一个可区分的键并存
+                dk = f"{dk}|{body[:24]}|{len(body)}"
+                if dk in seen:
+                    merged_dups += 1
+                    continue
             counter += 1
             text = "\n".join(rec["paragraphs"])
             poem = Poem(
@@ -90,9 +112,8 @@ def build_poems(verbose: bool = True) -> Tuple[List[Poem], Dict]:
 
 def _source_fingerprints() -> List[Dict]:
     out = []
-    root = config.CHINESE_POETRY_RAW
     for spec in src.SOURCES:
-        files = sorted(root.glob(spec["glob"]))
+        files = src.source_files(spec)
         out.append({
             "key": spec["key"],
             "book": spec["book"],

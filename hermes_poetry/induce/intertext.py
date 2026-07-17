@@ -1,11 +1,13 @@
 """互文检测：跨诗逐字复用（重出互见/袭用/化用）。
 
 移植伤寒-赫尔墨斯 quotation 层的 n-gram 倒排 + 对角线合并算法：
-  * 5-gram 倒排索引（简体折叠、仅 CJK）；出现于 >0.5% 诗篇的
-    高频 gram 视为套语剪除（如「万里」「不知」类）；
+  * 5-gram 倒排索引（简体折叠、仅 CJK）；文档频率 > GENERIC_DF_CAP 的
+    gram 视为套语/科白体例剪除（实测科白 gram「正末唱你道」df≈48，
+    真实诗句 gram 远低于此，绝对阈值 20 恰好切开两类）；
   * 命中点按对角线 (p - c) 合并成连续 run；
   * 分级：run≥10 且几乎全篇 → 重出互见；run≥7 → 袭用（逐字）；
-    run 5–6 → 化用（部分逐字）。
+    run 5–6 → 化用（部分逐字）；
+  * 全量挖掘（无中途截断）：语料按顺序完整扫描后落盘。
 """
 from __future__ import annotations
 
@@ -17,6 +19,14 @@ from ..schemas import IntertextRule, Poem, write_jsonl
 from ..textutil import content_only, t2s
 
 SHINGLE = 5
+GENERIC_DF_CAP = 20   # 绝对文档频率阈值：df>20 的 gram 视为套语/体例标记
+
+# 元杂剧科白/体例标记：含这些标记的共享跨度是剧本体例而非文学化用。
+# 高频 gram 剪除只能去掉头部，长尾组合仍会漏网，故按跨度内容再过滤一道。
+import re as _re
+RE_KEBAI = _re.compile(
+    r"(?:正末|正旦|外末|冲末|副末|净云|旦云|末云|带云|云了|唱了|做见|科了"
+    r"|一折|楔子|上场|下场|诗云|词云|了也)")
 
 
 class IntertextMiner:
@@ -24,7 +34,7 @@ class IntertextMiner:
         self.poems = poems
         self.folded: Dict[str, str] = {p.poem_id: content_only(t2s(p.text)) for p in poems}
         self.index: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
-        cap = max(20, int(0.005 * len(poems)))
+        cap = GENERIC_DF_CAP
         counts: Dict[str, int] = defaultdict(int)
         for pid, text in self.folded.items():
             seen = set()
@@ -61,7 +71,7 @@ class IntertextMiner:
             merged[pid] = runs
         return merged
 
-    def run(self, max_rules: int = 4000) -> List[IntertextRule]:
+    def run(self, max_rules: int = 60000) -> List[IntertextRule]:
         rules: List[IntertextRule] = []
         seen_pairs = set()
         seq = 0
@@ -86,6 +96,8 @@ class IntertextMiner:
                     continue
                 seen_pairs.add(pair)
                 span = a_text[best[0]:best[0] + span_len]
+                if RE_KEBAI.search(span):
+                    continue  # 科白体例，非文学互文
                 b_len = len(self.folded[b_id])
                 coverage = span_len / max(1, min(len(a_text), b_len))
                 if span_len >= 10 and coverage >= 0.8:

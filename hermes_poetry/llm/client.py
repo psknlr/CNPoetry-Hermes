@@ -50,9 +50,10 @@ class LLMSettings:
         return "litellm" if any(os.environ.get(k) for k in _PROVIDER_KEYS) else "local"
 
 
-def _cache_key(model, messages, tools, temperature, task, json_mode) -> str:
+def _cache_key(model, messages, tools, temperature, task, json_mode, max_tokens) -> str:
     blob = json.dumps({"m": model, "msgs": messages, "tools": tools, "t": temperature,
-                       "task": task, "j": json_mode}, sort_keys=True, ensure_ascii=False)
+                       "task": task, "j": json_mode, "mt": max_tokens},
+                      sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -92,18 +93,21 @@ class LLMClient:
                      and temp == 0.0 and not tools)
         key = None
         if cacheable:
-            key = _cache_key(self.settings.model, messages, tools, temp, task, json_mode)
+            key = _cache_key(self.settings.model, messages, tools, temp, task, json_mode,
+                             self.settings.max_tokens)
             hit = self._cache_load(key)
             if hit is not None:
                 self.usage["cache_hits"] += 1
                 return ChatResult(content=hit.get("content", ""), usage=hit.get("usage", {}),
-                                  backend=self._backend)
+                                  backend="litellm_cache")
+        fell_back = False
         try:
             res = self._provider.chat(messages, tools=tools, temperature=temp,
                                       json_mode=json_mode, task=task, context=context)
         except Exception as exc:
             self.usage["errors"] += 1
             if self.settings.fallback == "local" and self._backend == "litellm":
+                fell_back = True
                 res = LocalProvider(self.settings).chat(messages, tools=tools, temperature=temp,
                                                         json_mode=json_mode, task=task, context=context)
                 if res.content:
@@ -113,7 +117,9 @@ class LLMClient:
         self.usage["calls"] += 1
         for k in ("prompt_tokens", "completion_tokens"):
             self.usage[k] += int(res.usage.get(k, 0))
-        if cacheable and key and not res.tool_calls:
+        # 回退产物绝不落入 litellm 缓存——一次瞬时故障不得永久污染该问题
+        if cacheable and key and not res.tool_calls and not fell_back \
+                and res.backend == "litellm":
             self._cache_store(key, {"content": res.content, "usage": res.usage})
         return res
 

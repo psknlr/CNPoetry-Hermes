@@ -63,14 +63,15 @@ class Council:
                 plan["specialists"].append("ImageryAnalyst")
                 break
         for theme in THEMES:
-            if theme in q or any(m in q for m in list(THEMES[theme]["markers"])[:8]):  # type: ignore[index]
+            markers = [m for m in THEMES[theme]["markers"] if len(m) >= 2]  # type: ignore[index]
+            if theme in q or any(m in q for m in markers):
                 plan["entities"]["theme"] = theme
                 plan["specialists"].append("ThemeAnalyst")
                 break
         if len(titles) >= 2 or re.search(r"对比|比较|异同|区别", q):
             plan["specialists"].append("ComparisonAnalyst")
-        if not plan["specialists"]:
-            plan["specialists"] = ["ImageryAnalyst"] if plan["entities"].get("imagery") else ["ThemeAnalyst"]
+        # 无实体命中时不注入默认专家：宁可只靠取证员检索，
+        # 也不用无关题材档案推高置信度
         plan["specialists"] = list(dict.fromkeys(plan["specialists"]))
         return plan
 

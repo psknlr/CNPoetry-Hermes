@@ -43,9 +43,10 @@ def detect_form(poem: Poem) -> Dict:
     elif uniform and n == 8 and char_n == 7:
         form = "七律"
     elif uniform and char_n == 5:
-        form = "五言排律" if n > 8 and n % 2 == 0 else "五言古体"
+        # 无平仄数据无法区分排律与齐言古体，统一用诚实标签
+        form = "五言齐言长篇" if n > 8 and n % 2 == 0 else "五言古体"
     elif uniform and char_n == 7:
-        form = "七言排律" if n > 8 and n % 2 == 0 else "七言古体"
+        form = "七言齐言长篇" if n > 8 and n % 2 == 0 else "七言古体"
     elif uniform and char_n == 4:
         form = "四言"
     elif uniform and char_n == 6:

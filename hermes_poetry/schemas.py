@@ -35,9 +35,9 @@ EVIDENCE_TYPES = frozenset({
     "original_text",      # 诗文本身
     "annotation_text",    # 集内注释（notes）
     "appreciation_text",  # 白话导读（水墨唐诗 prologue）
-    "author_bio",         # 作者小传
     "external_analysis",  # 外部数据集 LLM 分析
 })
+# 注：作者小传（C层）经由 AuthorProfileRule.bio 呈现，不作为初始规则证据类型。
 
 INTERPRETATION_LEVELS = frozenset({
     "literal",          # 原文直述

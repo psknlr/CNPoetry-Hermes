@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import re
 from typing import Dict, List, Tuple
 
 # ── 意象词库：规范名 → 表面形式（最长优先）────────────────────────────
@@ -94,7 +93,7 @@ THEMES: Dict[str, Dict[str, object]] = {
     },
     "山水田园": {
         "definition": "山川林泉之趣与躬耕闲居之乐。",
-        "markers": ["田园", "南山", "空山", "青山", "溪", "泉", "松林", "竹里", "柴门", "荷锄", "采菊", "渔舟", "桑麻", "隐居", "幽居", "山居"],
+        "markers": ["田园", "南山", "空山", "青山", "清溪", "山泉", "林泉", "松林", "竹里", "柴门", "荷锄", "采菊", "渔舟", "桑麻", "隐居", "幽居", "山居"],
     },
     "咏史怀古": {
         "definition": "凭吊古迹、追怀往事以寄兴亡之感。",
@@ -102,11 +101,11 @@ THEMES: Dict[str, Dict[str, object]] = {
     },
     "咏物言志": {
         "definition": "托物寄意，借物自况。",
-        "markers": ["咏", "托", "高洁", "不染", "凌寒", "傲霜", "岁寒"],
+        "markers": ["高洁", "不染", "凌寒", "傲霜", "岁寒", "自况"],
     },
     "爱情闺怨": {
         "definition": "男女相思与闺中幽怨。",
-        "markers": ["相思", "闺", "妾", "罗衣", "罗帐", "红豆", "鸳鸯", "蛾眉", "画眉", "郎", "锦书", "青鸟", "蓬山"],
+        "markers": ["相思", "闺", "妾", "罗衣", "罗帐", "红豆", "鸳鸯", "蛾眉", "画眉", "情郎", "锦书", "青鸟", "蓬山"],
     },
     "节令风物": {
         "definition": "岁时节令与风俗物候。",
@@ -137,9 +136,6 @@ GENRE_ALIASES: Dict[str, str] = {
     "绝句": "绝句", "律诗": "律诗", "词": "词", "曲": "曲",
 }
 
-RE_HAN = re.compile(r"[㐀-鿿]")
-
-
 def _longest_first(pairs):
     return sorted(pairs, key=lambda kv: -len(kv[0]))
 
@@ -161,7 +157,7 @@ MOOD_HINTS: Dict[str, Dict[str, List[str]]] = {
     "思乡": {"themes": ["思乡羁旅"], "imagery": ["月", "雁"], "emotions": ["思念怀想"]},
     "离别": {"themes": ["送别怀人"], "imagery": ["柳", "长亭", "酒"], "emotions": ["愁苦哀伤"]},
     "送别": {"themes": ["送别怀人"], "imagery": ["柳", "长亭", "酒"], "emotions": ["愁苦哀伤"]},
-    "孤独": {"themes": [], "imagery": ["孤灯", "月", "舟"], "emotions": ["孤寂冷清"]},
+    "孤独": {"themes": [], "imagery": ["灯", "月", "舟"], "emotions": ["孤寂冷清"]},
     "失眠": {"themes": [], "imagery": ["月", "灯", "蟋蟀"], "emotions": ["孤寂冷清", "思念怀想"]},
     "秋天": {"themes": [], "imagery": ["霜", "菊", "雁", "梧桐"], "emotions": []},
     "春天": {"themes": [], "imagery": ["花", "柳", "燕", "雨"], "emotions": []},
@@ -174,4 +170,7 @@ MOOD_HINTS: Dict[str, Dict[str, List[str]]] = {
 
 
 def canonical_genre(label: str) -> str:
-    return GENRE_ALIASES.get((label or "").strip(), (label or "").strip())
+    """体裁标签归一：先简繁折叠再查别名表，保证「七言絕句」「七绝」同类。"""
+    from .textutil import t2s
+    folded = t2s((label or "").strip())
+    return GENRE_ALIASES.get(folded, folded)

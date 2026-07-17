@@ -42,32 +42,36 @@ class InitialRuleExtractor:
 
     # ── 意象-情感 ────────────────────────────────────────────────
     def _imagery_emotion_rules(self, poem: Poem, hits: List[LineHits]) -> List[InitialRule]:
-        rules = []
-        emitted = set()
+        # 先收集全部候选再择优：同句显证永远优先于先出现的邻证
+        best: Dict[tuple, tuple] = {}   # (canon, cat) -> (rank, i, surface, marker, span, same_line)
         for i, h in enumerate(hits):
             neighbors = [hits[i]] + ([hits[i + 1]] if i + 1 < len(hits) else [])
             for canon, surface in h.imagery:
                 for j, nb in enumerate(neighbors):
                     for cat, marker in nb.emotions:
-                        key = (canon, cat)
-                        if key in emitted:
-                            continue
                         same_line = j == 0
+                        rank = 0 if same_line else 1
                         span = h.line if same_line else f"{h.line}，{nb.line}"
-                        emitted.add(key)
-                        rules.append(InitialRule(
-                            initial_rule_id=self._next_id(poem),
-                            poem_id=poem.poem_id,
-                            rule_type="imagery_emotion_rule",
-                            if_conditions={"imagery": [canon], "imagery_surface": [surface]},
-                            then_conclusions={"emotion": cat, "emotion_marker": marker},
-                            evidence_span=span,
-                            evidence_type="original_text",
-                            strength="显证" if same_line else "邻证",
-                            interpretation=f"「{surface}」与情感标记「{marker}」{'同句' if same_line else '邻句'}共现。",
-                            interpretation_level="normalized",
-                            model_confidence=0.9 if same_line else 0.8,
-                        ))
+                        key = (canon, cat)
+                        cand = (rank, i, surface, marker, span, same_line)
+                        if key not in best or cand[:2] < best[key][:2]:
+                            best[key] = cand
+        rules = []
+        for (canon, cat), (rank, _i, surface, marker, span, same_line) in sorted(
+                best.items(), key=lambda kv: (kv[1][0], kv[1][1])):
+            rules.append(InitialRule(
+                initial_rule_id=self._next_id(poem),
+                poem_id=poem.poem_id,
+                rule_type="imagery_emotion_rule",
+                if_conditions={"imagery": [canon], "imagery_surface": [surface]},
+                then_conclusions={"emotion": cat, "emotion_marker": marker},
+                evidence_span=span,
+                evidence_type="original_text",
+                strength="显证" if same_line else "邻证",
+                interpretation=f"「{surface}」与情感标记「{marker}」{'同句' if same_line else '邻句'}共现。",
+                interpretation_level="normalized",
+                model_confidence=0.9 if same_line else 0.8,
+            ))
         return rules
 
     # ── 题材 ─────────────────────────────────────────────────────
@@ -119,7 +123,8 @@ class InitialRuleExtractor:
     def _rhyme_rule(self, poem: Poem) -> Optional[InitialRule]:
         m = poem.metrics
         feet = (m or {}).get("rhyme_feet") or []
-        if len(feet) < 2:
+        # 长篇齐言古体多换韵，整包韵脚不成一条韵事实，不产规则
+        if len(feet) < 2 or (m or {}).get("line_count", 0) > 8:
             return None
         # 证据句取最后一个偶数句
         even_lines = [poem.lines[i] for i in range(1, len(poem.lines), 2)]

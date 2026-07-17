@@ -63,6 +63,21 @@ class ImageryInducer:
                 if p:
                     co.update(x for x in p.imagery if x != canon)
             n_support = len(rules)
+            # 证据链跨朝代轮转采样（显证优先、共识分次之），
+            # 避免按语料顺序取前 12 条造成先秦系统性偏置
+            by_dyn: Dict[str, List[InitialRule]] = defaultdict(list)
+            for r in sorted(rules, key=lambda r: (r.strength != "显证",
+                                                  -r.autonomous_review.consensus_score)):
+                p = self.by_id.get(r.poem_id)
+                by_dyn[p.dynasty if p else "未知"].append(r)
+            chain_rules: List[InitialRule] = []
+            dyn_order = sorted(by_dyn, key=lambda d: -len(by_dyn[d]))
+            while len(chain_rules) < 12 and any(by_dyn.values()):
+                for d in dyn_order:
+                    if by_dyn[d]:
+                        chain_rules.append(by_dyn[d].pop(0))
+                        if len(chain_rules) >= 12:
+                            break
             out.append(ImageryProfileRule(
                 imagery_rule_id=f"IMR_{canon}",
                 imagery=canon,
@@ -75,8 +90,9 @@ class ImageryInducer:
                 evidence_chain=[{
                     "poem_id": r.poem_id, "title": self._title(r.poem_id),
                     "author": self._author(r.poem_id), "quote": r.evidence_span,
+                    "dynasty": (self.by_id[r.poem_id].dynasty if r.poem_id in self.by_id else ""),
                     "layer": "A",
-                } for r in rules[:12]],
+                } for r in chain_rules],
                 conflicts=conflicts,
                 consensus_score=round(min(0.95, 0.6 + 0.02 * n_support), 3),
                 release_level="gold" if n_support >= 8 else ("silver" if n_support >= 3 else "bronze"),
@@ -143,22 +159,30 @@ class CipaiInducer:
             grouped[t2s(p.cipai)].append(p)
         out = []
         for cipai_s, ps in sorted(grouped.items(), key=lambda kv: -len(kv[1])):
-            if len(ps) < 2:
+            if len(ps) < 2 or cipai_s in ("失调名", "无名氏"):  # 占位符不是词牌
                 continue
             patterns = Counter(char_pattern(p.metrics.get("char_counts", [])) for p in ps if p.metrics)
             mode_pattern, mode_n = patterns.most_common(1)[0]
             line_counts = Counter(p.metrics.get("line_count", 0) for p in ps if p.metrics)
+            consistency = round(mode_n / len(ps), 3)
             examples = ps[:3]
+            # 一调多体：一致率低时不冒称定格，降级并明示
+            level = "silver" if (len(ps) >= 5 and consistency >= 0.5) else "bronze"
+            note = "定格由语料归纳，非词谱权威表；一调多体时以众数为准。"
+            if consistency < 0.5:
+                alts = "、".join(f"{p_}({n_})" for p_, n_ in patterns.most_common(3))
+                note += f"（本调多体并存：{alts}，众数不足半数，仅供参考。）"
             out.append(CipaiProfileRule(
                 cipai_rule_id=f"CPR_{cipai_s}",
                 cipai=ps[0].cipai,
                 n_poems=len(ps),
                 line_count_mode=line_counts.most_common(1)[0][0] if line_counts else 0,
                 char_pattern=mode_pattern,
-                pattern_consistency=round(mode_n / len(ps), 3),
+                pattern_consistency=consistency,
                 example_poems=[{"poem_id": p.poem_id, "title": p.title, "author": p.author} for p in examples],
                 supporting_poems=[p.poem_id for p in ps][:300],
-                release_level="silver" if len(ps) >= 5 else "bronze",
+                release_level=level,
+                note=note,
             ))
         return out
 

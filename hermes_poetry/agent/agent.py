@@ -99,7 +99,12 @@ class PoetryAgent:
                                      "content": json.dumps(result, ensure_ascii=False)})
                 continue
             return res.content
-        return ""
+        # 步数耗尽：禁用工具做一轮收尾综合，绝不返回空答案
+        res = self.client.chat(messages + [{
+            "role": "user",
+            "content": "工具预算已用尽。请基于以上工具证据直接作答（引用其中的 poem_id）。"}],
+            tools=None)
+        return res.content
 
     @staticmethod
     def _evidence_ids(tool_results: List[Dict]) -> List[str]:

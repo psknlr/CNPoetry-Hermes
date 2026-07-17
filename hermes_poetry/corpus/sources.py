@@ -48,7 +48,7 @@ def _iter_standard(files: List[Path], book: str, dynasty: str, **over) -> Iterat
                 yield rec
 
 
-def _iter_shijing(files, book, dynasty):
+def _iter_shijing(files, book, dynasty, **over):
     for fp in files:
         for item in _load(fp):
             rec = _std(item, book, dynasty)
@@ -59,7 +59,7 @@ def _iter_shijing(files, book, dynasty):
                 yield rec
 
 
-def _iter_chuci(files, book, dynasty):
+def _iter_chuci(files, book, dynasty, **over):
     for fp in files:
         for item in _load(fp):
             rec = _std(item, book, dynasty)
@@ -68,7 +68,7 @@ def _iter_chuci(files, book, dynasty):
                 yield rec
 
 
-def _iter_qianjiashi(files, book, dynasty):
+def _iter_qianjiashi(files, book, dynasty, **over):
     for fp in files:
         data = _load(fp)
         for section in data.get("content", []):
@@ -76,6 +76,7 @@ def _iter_qianjiashi(files, book, dynasty):
             for item in section.get("content", []):
                 rec = _std(item, book, dynasty)
                 rec["title"] = (item.get("chapter") or "").strip()
+                rec["section"] = genre  # 体裁分卷，而非诗题（_std 会误取 chapter）
                 # 千家诗作者形如「（唐）孟浩然」，拆出朝代与姓名
                 raw_author = (item.get("author") or "").strip()
                 if raw_author.startswith("（") and "）" in raw_author:
@@ -88,11 +89,61 @@ def _iter_qianjiashi(files, book, dynasty):
                     yield rec
 
 
+def _iter_yuanqu(files, book, dynasty, **over):
+    """元曲专用：title 形如「剧名・宫调/曲牌」或「曲牌・曲文」。
+
+    * 「剧名・宫调/曲牌」→ section=剧名，cipai=曲牌，宫调入 tags；
+    * paragraphs 为空而「・」后是曲文（含句读或较长）→ 曲文入 paragraphs，
+      「・」前作曲牌，不再静默丢弃；
+    * 无「・」的散曲标题原样保留。
+    """
+    import re as _re
+    rx_punct = _re.compile(r"[，。！？；]")
+    for fp in files:
+        for item in _load(fp):
+            rec = _std(item, book, dynasty, **over)
+            title = rec["title"]
+            if "・" in title:
+                head, _, tail = title.partition("・")
+                if not rec["paragraphs"] and (rx_punct.search(tail) or len(tail) > 15):
+                    # 曲文误入 title 的支曲：救回正文
+                    rec["paragraphs"] = [tail]
+                    rec["cipai"] = head.strip()[:8]
+                    rec["title"] = head.strip() or "支曲"
+                else:
+                    rec["section"] = head.strip()          # 剧名
+                    qp = tail
+                    if "/" in tail:
+                        gongdiao, _, qp = tail.partition("/")
+                        if gongdiao.strip():
+                            rec["tags"] = rec["tags"] + [f"宫调:{gongdiao.strip()}"]
+                    rec["cipai"] = qp.strip()[:12]
+            if rec["paragraphs"]:
+                yield rec
+
+
+def _iter_nalan(files, book, dynasty, **over):
+    """纳兰词：题名「词牌·首句」拆出词牌。"""
+    for fp in files:
+        for item in _load(fp):
+            rec = _std(item, book, dynasty, **over)
+            for sep in ("·", "・", "‧"):
+                if sep in rec["title"]:
+                    head = rec["title"].split(sep, 1)[0].strip()
+                    if 1 < len(head) <= 7:
+                        rec["cipai"] = head
+                    break
+            if rec["paragraphs"]:
+                yield rec
+
+
 _PARSERS = {
     "standard": _iter_standard,
     "shijing": _iter_shijing,
     "chuci": _iter_chuci,
     "qianjiashi": _iter_qianjiashi,
+    "yuanqu": _iter_yuanqu,
+    "nalan": _iter_nalan,
 }
 
 # ── 来源登记（显式白名单；key 进入 poem_id）──────────────────────────
@@ -109,8 +160,8 @@ SOURCES: List[Dict[str, Any]] = [
     {"key": "QSS", "glob": "quansongshi/poet.song.*.json", "book": "全宋诗（抽样）", "dynasty": "宋", "parser": "standard"},
     {"key": "SONGCI300", "glob": "songci300/songci300.json", "book": "宋词三百首", "dynasty": "宋", "parser": "standard"},
     {"key": "SONGCI", "glob": "songci/ci.song.*.json", "book": "全宋词（抽样）", "dynasty": "宋", "parser": "standard"},
-    {"key": "YUANQU", "glob": "yuanqu/yuanqu.json", "book": "元曲", "dynasty": "元", "parser": "standard", "over": {"genre_tag": "曲"}},
-    {"key": "NALAN", "glob": "nalan/nalan.json", "book": "纳兰词", "dynasty": "清", "parser": "standard", "over": {"genre_tag": "词"}},
+    {"key": "YUANQU", "glob": "yuanqu/yuanqu.json", "book": "元曲", "dynasty": "元", "parser": "yuanqu", "over": {"genre_tag": "曲"}},
+    {"key": "NALAN", "glob": "nalan/nalan.json", "book": "纳兰词", "dynasty": "清", "parser": "nalan", "over": {"genre_tag": "词"}},
 ]
 
 AUTHOR_BIO_FILES = {
@@ -119,15 +170,21 @@ AUTHOR_BIO_FILES = {
 }
 
 
+def _natural_key(path: Path):
+    """分片文件按数字排序（poet.tang.10000 在 poet.tang.2000 之后），
+    保证扩充下载后 poem_id 不漂移。"""
+    import re as _re
+    return [int(x) if x.isdigit() else x for x in _re.split(r"(\d+)", path.name)]
+
+
+def source_files(spec: Dict[str, Any]) -> List[Path]:
+    return sorted(config.CHINESE_POETRY_RAW.glob(spec["glob"]), key=_natural_key)
+
+
 def iter_source(spec: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
-    root = config.CHINESE_POETRY_RAW
-    files = sorted(root.glob(spec["glob"]))
+    files = source_files(spec)
     parser = _PARSERS[spec["parser"]]
-    over = spec.get("over", {})
-    if spec["parser"] == "standard":
-        yield from parser(files, spec["book"], spec["dynasty"], **over)
-    else:
-        yield from parser(files, spec["book"], spec["dynasty"])
+    yield from parser(files, spec["book"], spec["dynasty"], **spec.get("over", {}))
 
 
 def load_author_bios() -> Dict[str, Dict[str, str]]:

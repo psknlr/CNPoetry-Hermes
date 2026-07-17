@@ -27,9 +27,17 @@ class PoemRAG:
         self.by_id: Dict[str, Poem] = {p.poem_id: p for p in poems}
         self._title_index: Dict[str, List[Poem]] = {}
         self._author_index: Dict[str, List[Poem]] = {}
+        self._cipai_names: List[str] = []
+        cipai_seen = set()
         for p in poems:
             self._title_index.setdefault(t2s(p.title), []).append(p)
             self._author_index.setdefault(t2s(p.author), []).append(p)
+            if p.cipai:
+                cs = t2s(p.cipai)
+                if len(cs) >= 2 and cs not in cipai_seen:
+                    cipai_seen.add(cs)
+                    self._cipai_names.append(cs)
+        self._cipai_names.sort(key=len, reverse=True)
         self.index = self._build_index(cache_fingerprint)
 
     def _build_index(self, fingerprint: str) -> BM25Index:
@@ -78,15 +86,18 @@ class PoemRAG:
         m = RE_POEM_ID_Q.search(query)
         if m and m.group(0) in self.by_id:
             return [self._hit(self.by_id[m.group(0)], 99.0, "direct_id")]
-        # 捷径二：《题名》
-        tm = RE_TITLE_REF.search(query)
-        if tm:
-            cands = self._title_index.get(t2s(tm.group(1)), [])
-            if cands:
-                rest = normalize_query(RE_TITLE_REF.sub("", query))
+        # 捷径二：《题名》（多个书名号全部解析——对比类查询不丢作品）
+        titles = RE_TITLE_REF.findall(query)
+        if titles:
+            all_hits = []
+            rest = normalize_query(RE_TITLE_REF.sub("", query))
+            for ttl in titles:
+                cands = self._title_index.get(t2s(ttl), [])
                 if len(cands) > 1 and rest:
                     cands = [p for p in cands if t2s(p.author) in rest] or cands
-                return [self._hit(p, 99.0, "direct_title") for p in cands[:top_k]]
+                all_hits.extend(self._hit(p, 99.0, "direct_title") for p in cands[:3])
+            if all_hits:
+                return all_hits[:max(top_k, len(titles))]
 
         # 结构化过滤
         def passes(p: Poem) -> bool:
@@ -102,10 +113,21 @@ class PoemRAG:
                 return False
             return True
 
-        q_imagery = self._query_imagery(q)
-        q_themes = [theme for m2, theme in THEME_SURFACE if m2 in q]
+        # 词牌名先从查询中剥离，避免「浣溪沙」被当作意象/内容词解析
+        q_for_parse = q
+        for cn in self._cipai_names:
+            if cn in q_for_parse:
+                q_for_parse = q_for_parse.replace(cn, " ")
+                if not cipai:
+                    cipai = cn
+        q_imagery = self._query_imagery(q_for_parse)
+        # 题材标记：单字标记（溪/禅类）误命中率高，只认 ≥2 字标记
+        q_themes = [theme for m2, theme in THEME_SURFACE if len(m2) >= 2 and m2 in q_for_parse]
         bm_query = self._expand_query(q, q_imagery) if expand else q
-        pool = self.index.search(bm_query, top_k=max(top_k * 5, 40))
+        # 过滤器激活时扩大候选池，防止过滤后召回崩塌
+        filters_active = bool(dynasty or author or genre or cipai or source)
+        pool_size = 600 if filters_active else max(top_k * 5, 40)
+        pool = self.index.search(bm_query, top_k=pool_size)
         bm_max = pool[0][1] if pool else 1.0
         hits = []
         for pid, bm in pool:
@@ -133,7 +155,16 @@ class PoemRAG:
             for p in self._author_index[t2s(query.strip())][:top_k]:
                 hits.append(self._hit(p, 50.0, "author_index"))
         hits.sort(key=lambda h: -h["score"])
-        return hits[:top_k]
+        # 结果去重：同一作品的重出互见/异文变体只占一个名额
+        deduped, seen_keys = [], set()
+        for h in hits:
+            p = self.by_id[h["poem_id"]]
+            key = f"{t2s(p.author)}|{t2s(p.title)[:8]}|{t2s(p.text)[:10]}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(h)
+        return deduped[:top_k]
 
     def _best_quote(self, p: Poem, q_imagery: List[str]) -> str:
         if q_imagery:

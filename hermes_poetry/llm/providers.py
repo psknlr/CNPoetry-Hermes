@@ -149,16 +149,23 @@ class LocalProvider:
             return ChatResult(tool_calls=[ToolCall(id="local_1", name=name, arguments=args)],
                               backend="local")
 
-        title = re.search(r"[《〈]([^》〉]{1,20})[》〉]", q)
+        titles = re.findall(r"[《〈]([^》〉]{1,20})[》〉]", q)
+        title = titles[0] if titles else None
+        # 多题名或题名+对比意图 → 对比工具优先（单题名短路会吞掉对比问题）
+        if len(titles) >= 2 or (title and _RE_DIFF_Q.search(q)):
+            return call("poetry_differential", {"poem_refs": [f"《{t}》" for t in titles[:3]]}
+                        if len(titles) >= 2 else {"query": q})
         if title and _RE_METRIC_Q.search(q):
-            return call("poetry_metrics", {"poem_ref": f"《{title.group(1)}》"})
+            return call("poetry_metrics", {"poem_ref": f"《{title}》"})
         if title and _RE_INTERTEXT_Q.search(q):
-            return call("poetry_intertext", {"poem_ref": f"《{title.group(1)}》"})
+            return call("poetry_intertext", {"poem_ref": f"《{title}》"})
         if title:
-            return call("poetry_poem", {"poem_ref": f"《{title.group(1)}》"})
+            return call("poetry_poem", {"poem_ref": f"《{title}》"})
         gm = _RE_GLOSS_Q.search(q)
         if gm:
-            chars = gm.group(1) or "".join(re.findall(r"[「『\"]([㐀-鿿]{1,4})[」』\"]", q)) or q
+            # 引号内的字优先（『「愁」字的意思』问的是愁不是字）
+            quoted = "".join(re.findall(r"[「『\"‘]([㐀-鿿]{1,4})[」』\"’]", q))
+            chars = quoted or gm.group(1) or q
             return call("poetry_gloss", {"chars": chars[:8]})
         if _RE_CIPAI_Q.search(q):
             cp = re.sub(r"的?(?:词牌|定格|格式).*$", "", q).strip()

@@ -28,11 +28,18 @@ class Tool:
                              "parameters": self.parameters}}
 
 
+MAX_STRING_ARG = 500
+
+
 def _coerce(value, typ):
     if typ == "integer" and isinstance(value, str) and value.lstrip("-").isdigit():
         return int(value)
+    if typ == "boolean" and isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "是")
     if typ == "array" and isinstance(value, str):
-        return [x for x in value.replace("，", ",").split(",") if x.strip()]
+        return [x.strip() for x in value.replace("，", ",").split(",") if x.strip()]
+    if typ == "array" and isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
     return value
 
 
@@ -115,9 +122,16 @@ class ToolRegistry:
         if not refs and query:
             import re as _re
             refs = [f"《{t}》" for t in _re.findall(r"[《〈]([^》〉]{1,20})[》〉]", query)]
-            if len(refs) < 2:
-                hits = self.engine.rag.search(query, top_k=2)
-                refs = [h["poem_id"] for h in hits]
+        if len(refs) < 2 and query:
+            # 已解析的题名保留，检索命中只补足缺口（不整组替换）
+            have = {self.engine.resolve_poem(r).poem_id
+                    for r in refs if self.engine.resolve_poem(r)}
+            for h in self.engine.rag.search(query, top_k=4):
+                if h["poem_id"] not in have:
+                    refs.append(h["poem_id"])
+                    have.add(h["poem_id"])
+                if len(refs) >= 2:
+                    break
         return self.engine.differential(refs)
 
     def _metrics(self, poem_ref="") -> Dict:
@@ -183,9 +197,13 @@ class ToolRegistry:
                     v = max(lo, v)
                 if hi is not None:
                     v = min(hi, v)
-            if typ == "string" and not isinstance(v, str):
-                v = str(v)
-            if typ == "array" and not isinstance(v, list):
+            if typ == "string":
+                v = str(v)[:MAX_STRING_ARG]
+            if typ == "array":
+                if not isinstance(v, list):
+                    return {"error": f"bad_arg_type:{k}"}
+                v = [str(x)[:MAX_STRING_ARG] for x in v[:20]]
+            if typ == "boolean" and not isinstance(v, bool):
                 return {"error": f"bad_arg_type:{k}"}
             clean[k] = v
         for req in tool.parameters.get("required", []):
@@ -200,7 +218,9 @@ class ToolRegistry:
         blob = json.dumps(result, ensure_ascii=False)
         if len(blob.encode("utf-8")) > MAX_RESULT_BYTES:
             result = {"error": "result_too_large"}
-        self.audit.append({"tool": name, "args": clean,
+        self.audit.append({"tool": name,
+                           "args": {k: (v[:80] if isinstance(v, str) else v)
+                                    for k, v in clean.items()},
                            "ok": "error" not in result})
         if len(self.audit) > 512:
             del self.audit[:256]

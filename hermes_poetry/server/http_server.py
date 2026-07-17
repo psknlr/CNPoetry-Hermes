@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -105,7 +106,7 @@ def make_handler(service: ServiceContext):
                 if auth.startswith("Bearer "):
                     supplied = auth[7:]
                 supplied = supplied or self.headers.get("X-Auth-Token", "")
-                if supplied != auth_token:
+                if not hmac.compare_digest(supplied.encode(), auth_token.encode()):
                     return self._send(401, {"error": "unauthorized"})
             body = self._json_body(method)
             if body is None:
@@ -155,7 +156,9 @@ def make_handler(service: ServiceContext):
         def _serve_static(self, path: str):
             rel = "index.html" if path in ("/", "") else path.lstrip("/")
             target = (STATIC_DIR / rel).resolve()
-            if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.is_file():
+            root = STATIC_DIR.resolve()
+            # 以父目录关系判定（startswith 字符串前缀会放行 static_evil 类同级目录）
+            if not (target == root or root in target.parents) or not target.is_file():
                 return self._send(404, {"error": "not_found"})
             blob = target.read_bytes()
             self.send_response(200)

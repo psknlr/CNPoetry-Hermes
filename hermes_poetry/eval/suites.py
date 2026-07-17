@@ -53,7 +53,7 @@ def eval_retrieval(limit: int = 200) -> Dict:
             "note": "查询=每首最长一句；twin_hits 为重出互见孪生命中（计入 Top-K）。"}
 
 
-def eval_metrics(limit: int = 0) -> Dict:
+def eval_metrics() -> Dict:
     from ..apps.engine import get_engine
     from ..lexicon import canonical_genre
     engine = get_engine()

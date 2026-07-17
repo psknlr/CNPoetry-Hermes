@@ -17,7 +17,7 @@ from ..schemas import Poem
 from ..textutil import contains_verbatim, similarity, t2s
 
 RE_POEM_ID = re.compile(r"CNP_[A-Z0-9]+_\d{5}")
-RE_QUOTE = re.compile(r"[「『“\"]([^」』”\"]{4,60})[」』”\"]")
+RE_QUOTE = re.compile(r"[「『“\"‘]([^」』”\"’]{4,100})[」』”\"’]")
 
 
 @dataclass
@@ -74,12 +74,17 @@ class CitationGuard:
                 q = qm.group(1)
                 if not re.search(r"[㐀-鿿]{4,}", q):
                     continue  # 非诗句引文（口语引号）跳过
-                holders = [pid for pid, text in corpus.items()
-                           if contains_verbatim(text, q) or similarity(t2s(q), t2s(text)) >= 0.6]
+                # 铁律二：引文只认逐字回源（简繁/异体/标点折叠后子串）。
+                # Dice 相似度绝不作为放行条件——改一字的整篇引用必须被抓住；
+                # 相似度只用于 mismatch 时给出最近候选诊断。
+                holders = [pid for pid, text in corpus.items() if contains_verbatim(text, q)]
                 if not holders:
-                    best = max((similarity(t2s(q), t2s(t)) for t in corpus.values()), default=0.0)
-                    if best < 0.45:
-                        rep.quote_mismatches.append({"quote": q, "matched": False})
+                    best_sim = max((similarity(t2s(q), t2s(t)) for t in corpus.values()), default=0.0)
+                    rep.quote_mismatches.append({
+                        "quote": q, "matched": False,
+                        "nearest_similarity": round(best_sim, 3),
+                        "note": "非逐字引用（疑似改字/拼接）" if best_sim >= 0.45 else "语料中无此句",
+                    })
                     continue
                 if id_positions:
                     nearest = min(id_positions, key=lambda p: abs(p[0] - qm.start()))[1]

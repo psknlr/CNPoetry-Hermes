@@ -47,28 +47,42 @@ class PoemStore:
             return [poem.text] if ext and contains_verbatim(ext.get("text", ""), rule.evidence_span) else []
         return []
 
+    def external_record(self, rule: InitialRule) -> Optional[Dict]:
+        return self.external.get(str(rule.if_conditions.get("external_id", "")))
+
 
 # ── 阶段一：schema ────────────────────────────────────────────────────
 
 def validate_schema(rule: InitialRule) -> Tuple[bool, List[str]]:
+    from ..textutil import content_only
     flags = []
     if not RE_INITIAL_RULE_ID.match(rule.initial_rule_id or ""):
         flags.append("schema:bad_rule_id")
     if not RE_POEM_ID.match(rule.poem_id or ""):
         flags.append("schema:bad_poem_id")
+    # 规则 ID 必须锚定其声称的 poem_id（防止移花接木）
+    if rule.poem_id and rule.initial_rule_id:
+        stem = rule.poem_id.replace("CNP_", "", 1)
+        if not rule.initial_rule_id.startswith(f"IR_CNP_{stem}_"):
+            flags.append("schema:rule_id_poem_id_mismatch")
     if rule.rule_type not in RULE_TYPES:
         flags.append(f"schema:bad_rule_type:{rule.rule_type}")
     if rule.evidence_type not in EVIDENCE_TYPES:
         flags.append(f"schema:bad_evidence_type:{rule.evidence_type}")
     if rule.interpretation_level not in INTERPRETATION_LEVELS:
         flags.append("schema:bad_interpretation_level")
-    if len((rule.evidence_span or "").strip()) < 2:
+    # 跨度长度按内容字（去标点）计，防单字/标点跨度充数
+    if len(content_only(rule.evidence_span or "")) < 3:
         flags.append("schema:evidence_span_too_short")
     if not isinstance(rule.if_conditions, dict) or not rule.if_conditions:
         flags.append("schema:empty_if_conditions")
     if not isinstance(rule.then_conclusions, dict) or not rule.then_conclusions:
         flags.append("schema:empty_then_conclusions")
-    if not (0.0 <= float(rule.model_confidence) <= 1.0):
+    try:
+        conf = float(rule.model_confidence)
+        if not (0.0 <= conf <= 1.0):
+            flags.append("schema:bad_confidence")
+    except (TypeError, ValueError):
         flags.append("schema:bad_confidence")
     return (not flags, flags)
 
@@ -93,6 +107,39 @@ def verify_evidence(rule: InitialRule, store: PoemStore) -> Tuple[bool, List[str
     marker = rule.then_conclusions.get("emotion_marker")
     if marker and not contains_verbatim(rule.evidence_span, marker):
         flags.append(f"evidence:emotion_marker_not_in_span:{marker}")
+    # 意象-情感规则的 IF/THEN 内部一致性（伪造词库映射防线）
+    if rule.rule_type == "imagery_emotion_rule":
+        from ..lexicon import EMOTIONS, IMAGERY
+        surfaces = rule.if_conditions.get("imagery_surface") or []
+        canons = rule.if_conditions.get("imagery") or []
+        if not surfaces or not canons:
+            flags.append("evidence:imagery_rule_missing_surface_or_canon")
+        else:
+            canon = canons[0]
+            reg = {t2s(s) for s in IMAGERY.get(canon, [])}
+            for s in surfaces:
+                if t2s(s) not in reg:
+                    flags.append(f"evidence:surface_not_registered_for_imagery:{s}->{canon}")
+        emo = rule.then_conclusions.get("emotion", "")
+        if marker and emo in EMOTIONS:
+            reg_markers = {t2s(m) for m in EMOTIONS[emo]}
+            if t2s(marker) not in reg_markers:
+                flags.append(f"evidence:marker_not_registered_for_emotion:{marker}->{emo}")
+    # D层规则：结论必须逐字来自外部记录对应字段（防移花接木改写）
+    if rule.evidence_type == "external_analysis":
+        ext = store.external_record(rule)
+        if ext is None:
+            flags.append("evidence:external_record_not_found")
+        else:
+            for key in ("subject", "theme", "emotion"):
+                val = rule.then_conclusions.get(key)
+                if val and not contains_verbatim(ext.get(key, ""), val):
+                    flags.append(f"evidence:external_conclusion_not_in_record:{key}")
+    # 注释规则：结论文本必须逐字来自被绑定的注释本身
+    if rule.rule_type == "annotation_rule":
+        note = rule.then_conclusions.get("annotation", "")
+        if not note or not any(contains_verbatim(n, note) for n in poem.notes):
+            flags.append("evidence:annotation_not_in_notes")
     return (not flags, flags)
 
 
@@ -114,6 +161,9 @@ def review_semantics(rule: InitialRule, store: PoemStore) -> Tuple[str, List[str
     if rule.rule_type == "theme_rule":
         if rule.then_conclusions.get("theme") not in THEMES:
             return "fail", [f"semantic:unknown_theme:{rule.then_conclusions.get('theme')}"]
+        if not (rule.if_conditions.get("theme_markers") or []):
+            # 标记词被修复删空 → 零证据题材规则不得发布
+            return "fail", ["semantic:theme_rule_without_markers"]
     if rule.rule_type == "form_metric_rule":
         from ..extract.metrics import detect_form, char_pattern
         m = detect_form(poem)
@@ -144,13 +194,15 @@ def criticize(rule: InitialRule, store: PoemStore) -> Tuple[str, List[str]]:
         if term in body:
             flags.append(f"critic:posthoc_term_in_body:{term}")
             hard_fail = True
-    # 2) 情感标记处于否定语境却计为正向（硬失败）
+    # 2) 情感标记处于否定语境却计为正向（硬失败）。
+    #    统一在去标点/空白的内容层扫描，防止带杂质的 marker 绕过检查。
     if rule.rule_type == "imagery_emotion_rule":
+        from ..textutil import content_only
         marker = rule.then_conclusions.get("emotion_marker", "")
-        span = t2s(rule.evidence_span)
+        span = content_only(t2s(rule.evidence_span))
         if marker:
-            m_folded = t2s(marker)
-            idx = span.find(m_folded)
+            m_folded = content_only(t2s(marker))
+            idx = span.find(m_folded) if m_folded else -1
             while idx >= 0:
                 if idx > 0 and span[idx - 1] in NEGATION_PREFIX:
                     flags.append(f"critic:negated_emotion_as_positive:{marker}")
@@ -169,8 +221,9 @@ def criticize(rule: InitialRule, store: PoemStore) -> Tuple[str, List[str]]:
             )
             if not same_line:
                 flags.append("critic:strength_overclaimed")
-    # 4) D层规则冒称本系统结论（硬失败）
-    if rule.rule_type == "external_analysis_rule" and rule.interpretation_level != "external_llm":
+    # 4) D层证据冒称本系统结论（硬失败）。按 evidence_type 判定而非
+    #    rule_type——改个类型名绕不过去。
+    if rule.evidence_type == "external_analysis" and rule.interpretation_level != "external_llm":
         flags.append("critic:external_analysis_mislabelled")
         hard_fail = True
     result = "fail" if hard_fail else ("warn" if flags else "pass")
@@ -233,8 +286,8 @@ def consensus_score(rule: InitialRule, evidence_ok: bool, sem: str, crit: str, r
     return max(0.0, min(score, 0.98))
 
 
-def release_gate(score: float, evidence_ok: bool, crit: str) -> str:
-    if not evidence_ok or crit == "fail":
+def release_gate(score: float, evidence_ok: bool, crit: str, sem: str = "pass") -> str:
+    if not evidence_ok or crit == "fail" or sem == "fail":
         return "rejected"
     if score >= config.RELEASE_GOLD:
         return "gold"
@@ -304,10 +357,18 @@ class ReviewPipeline:
             rv.critic_result = crit
             rv.critic_flags = crit_flags
             self._audit(rule, "evidence", "pass" if ev_ok else "fail", ev_flags, reverify=True)
-        # 6 consensus + release
+        # 6 consensus + release（修复后重跑 schema，修空的规则不得发布）
+        if repairs:
+            schema_ok, schema_flags = validate_schema(rule)
+            rv.schema_valid = schema_ok
+            if not schema_ok:
+                self._audit(rule, "schema", "fail", schema_flags, reverify=True)
+                rv.release_level = "rejected"
+                self._audit(rule, "release", "rejected", schema_flags)
+                return rule
         score = consensus_score(rule, ev_ok, sem, crit, bool(repairs))
         rv.consensus_score = round(score, 3)
-        level = release_gate(score, ev_ok, crit)
+        level = release_gate(score, ev_ok, crit, sem)
         rv.release_level = level
         self._audit(rule, "consensus", "pass", [], score=rv.consensus_score)
         self._audit(rule, "release", level, [])
