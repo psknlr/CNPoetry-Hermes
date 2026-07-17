@@ -102,6 +102,9 @@ class ToolRegistry:
             {"topic": {"type": "string"}}, lambda topic="": e.teach(topic), required=["topic"])
         add("poetry_external_analysis", "外部LLM分析（D层）：PoetryMTEB 数据集对该诗的意图/题材/情感分析。",
             {"poem_ref": {"type": "string"}}, self._external, required=["poem_ref"])
+        add("poetry_gloss", "字义训诂（C层）：说文解字本义（部首/反切/释文）与尔雅训释组。",
+            {"chars": {"type": "string"}, "poem_ref": {"type": "string"}},
+            lambda chars="", poem_ref="": e.gloss_query(chars, poem_ref))
         add("poetry_research", "研究端：意象共现网络、朝代分布、情感×意象矩阵。",
             {"topic": {"type": "string"}}, lambda topic="": e.research(topic))
         add("poetry_stats", "语料与规则库统计。", {}, lambda: {"stats": e.stats()})

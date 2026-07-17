@@ -146,6 +146,76 @@ def load_author_bios() -> Dict[str, Dict[str, str]]:
     return bios
 
 
+def load_shuowen() -> Dict[str, Dict[str, str]]:
+    """说文解字（C层训诂，gujilab/chinese-classical-corpus，CC0）。
+
+    返回 简体折叠字 → {char, radical, pinyin, fanqie, gloss}；
+    同一简体对应多个繁体字头时保留首见（原字头存于 char 字段）。
+    """
+    from ..textutil import t2s
+    fp = config.RAW_DIR / "gujilab" / "shuowen.jsonl"
+    out: Dict[str, Dict[str, str]] = {}
+    if not fp.exists():
+        return out
+    with fp.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ch = (r.get("char") or "").strip()
+            if ch:
+                out.setdefault(t2s(ch), r)
+                out.setdefault(ch, r)
+    return out
+
+
+def load_erya_glosses() -> List[Dict[str, Any]]:
+    """尔雅训释组（C层，gujilab，CC0）：[{chapter, members, gloss}]。
+
+    解析「初、哉、首…，始也。」式训释行；不合式的行如实跳过。
+    """
+    import re
+    fp = config.RAW_DIR / "gujilab" / "erya.jsonl"
+    groups: List[Dict[str, Any]] = []
+    if not fp.exists():
+        return groups
+    rx = re.compile(r"^(.{1,80}?)，(.{1,12}也)。?$")
+    with fp.open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            def emit(text: str) -> bool:
+                m = rx.match(text)
+                if not m:
+                    return False
+                members = [x for x in re.split(r"[、，]", m.group(1)) if 0 < len(x) <= 3]
+                if len(members) >= 2:
+                    groups.append({"chapter": r.get("chapter", ""),
+                                   "members": members, "gloss": m.group(2)})
+                return True
+
+            buf = ""
+            for ln in (r.get("content") or "").split("\n"):
+                ln = ln.strip().replace("　", "")
+                if not ln:
+                    continue
+                if emit(buf + ln):          # 续行拼接成组
+                    buf = ""
+                elif emit(ln):              # 悬垂缓冲无效，本行自成一组
+                    buf = ""
+                elif len(buf) + len(ln) > 200:
+                    buf = ln                # 丢弃超长悬垂，本行重新开始
+                else:
+                    buf += ln
+    return groups
+
+
 def load_external_analysis() -> List[Dict[str, Any]]:
     """外部 LLM 分析样本（D层，PoetryMTEB/DeepSeek-V3.1 生成）。"""
     fp = config.HF_ANALYSIS_FILE

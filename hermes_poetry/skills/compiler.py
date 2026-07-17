@@ -67,6 +67,7 @@ class SkillCompiler:
             "cipai": self._cipai(root),
             "authors": self._authors(root),
             "rhyme": self._rhyme(root),
+            "gloss": self._gloss(root),
         }
         manifest = {
             "tree": "hermes.cnpoetry",
@@ -156,6 +157,16 @@ class SkillCompiler:
                          [{"query": f"{r.author}的诗风", "route": "author", "args": {"author": r.author}}])
             n += 1
         return n
+
+    def _gloss(self, root: Path) -> int:
+        md = _frontmatter("hermes.cnpoetry.gloss",
+                          "字义训诂（C层）：说文解字逐字条目与尔雅训释组（gujilab，CC0）") + \
+            "# 字义训诂\n\n以《说文解字》9,829 条逐字条目（部首/反切/释文）与《尔雅》训释组\n" \
+            "回答单字本义。诗中用义可能引申，本层为 C 层旁证，不作诗义定论。\n"
+        _write_skill(root / "hermes.cnpoetry.gloss", md, [],
+                     [{"query": "婵字的本义", "route": "gloss", "args": {"chars": "婵"}},
+                      {"query": "说文解字怎么解释天", "route": "gloss", "args": {"chars": "天"}}])
+        return 1
 
     def _rhyme(self, root: Path) -> int:
         md = _frontmatter("hermes.cnpoetry.rhyme", f"韵伴聚类（语料归纳）：{len(self.rhyme_rules)} 组") + \

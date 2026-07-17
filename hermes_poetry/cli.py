@@ -75,6 +75,10 @@ def main(argv=None) -> int:
     p.add_argument("--poem", default="")
     p.add_argument("--text", default="")
 
+    p = sub.add_parser("gloss", help="字义训诂（C层：说文解字/尔雅）")
+    p.add_argument("--chars", default="", help="1-8 个汉字")
+    p.add_argument("--poem", default="", help="按作品取高频字训诂")
+
     p = sub.add_parser("research", help="研究端（意象网络/朝代分布/情感矩阵）")
     p.add_argument("topic", nargs="?", default="")
 
@@ -177,6 +181,8 @@ def main(argv=None) -> int:
         _print(engine.rhyme_query(args.char, args.poem))
     elif args.cmd == "intertext":
         _print(engine.intertext_query(args.poem, args.text))
+    elif args.cmd == "gloss":
+        _print(engine.gloss_query(args.chars, args.poem))
     elif args.cmd == "research":
         _print(engine.research(args.topic))
     elif args.cmd == "ask":

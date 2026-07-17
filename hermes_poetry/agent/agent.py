@@ -35,8 +35,20 @@ class PoetryAgent:
             return governed({"question": question, "answer": ig["notice"],
                              "blocked": True, "trace": []}, role)
         registry = self.registry.for_role(role)
-        messages = [{"role": "system", "content": agent_system(role)},
-                    {"role": "user", "content": question}]
+        messages = [{"role": "system", "content": agent_system(role)}]
+        skill_route = None
+        try:
+            from ..skills.skill_rag import get_skill_rag
+            skill_route = get_skill_rag().route(question)
+        except Exception:
+            skill_route = None
+        if skill_route:
+            messages.append({"role": "system", "content":
+                             f"路由提示（SkillRAG）：技能 {skill_route['skill']}，"
+                             f"建议工具 {skill_route['tool']}，"
+                             f"参数 {json.dumps(skill_route['args'], ensure_ascii=False)}。"
+                             "仅当与问题相符时采用，不相符时按自己的判断取证。"})
+        messages.append({"role": "user", "content": question})
         tool_results: List[Dict] = []
         answer = self._react(messages, tool_results, registry)
         allowed_ids = self._evidence_ids(tool_results)
@@ -60,6 +72,7 @@ class PoetryAgent:
             "citation_report": report.to_dict(),
             "tool_trace": [{"tool": t["tool"], "arguments": t["arguments"]} for t in tool_results],
             "evidence_ids": self._evidence_ids(tool_results),
+            "skill_route": skill_route,
             "backend": self.client.backend,
         }, role)
 

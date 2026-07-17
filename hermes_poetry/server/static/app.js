@@ -99,6 +99,15 @@ async function openPoem(ref) {
         el("div", { class: "kv" }, "互文："),
         d.intertext.map((r) => el("div", { class: "kv" }, `${r.mode}「${r.shared_span}」↔ `,
           el("span", { class: "pid", onclick: () => openPoem(r.other) }, r.other)))) : null,
+      el("button", { class: "mini", onclick: async () => {
+        const g = await api.post("/api/gloss", { poem_ref: p.poem_id });
+        if (g.glosses) {
+          $("#drawer-body").append(el("div", { class: "card" },
+            el("span", { class: "layer C" }, "C 训诂（高频字）"),
+            g.glosses.map((x) => el("div", { class: "kv" },
+              `「${x.char}」${x.shuowen ? esc(x.shuowen.gloss) : "字书无载"}`))));
+        }
+      } }, "查此诗高频字训诂"),
     );
   } catch (e) { body.textContent = "错误：" + e.message; }
 }
@@ -358,6 +367,33 @@ views.author = async (main) => {
     el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "查询")), out);
 };
 
+views.gloss = async (main) => {
+  const input = el("input", { placeholder: "1-8 个汉字，如：雎鸠 / 婵娟；或《题名》查高频字" });
+  const out = el("div", {});
+  const run = async () => {
+    out.replaceChildren(el("div", { class: "card" }, "查阅字书…"));
+    const v = input.value.trim();
+    const body = v.startsWith("《") ? { poem_ref: v } : { chars: v };
+    const d = await api.post("/api/gloss", body);
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    out.replaceChildren(el("div", { class: "card" },
+      el("div", { class: "kv" }, el("span", { class: "layer C" }, "C 训诂"), el("i", {}, esc(d.note))),
+      el("table", {}, el("tr", {}, el("th", {}, "字"), el("th", {}, "说文解字"), el("th", {}, "尔雅")),
+        (d.glosses || []).map((g) => el("tr", {},
+          el("td", { style: "font-size:18px" }, g.char),
+          el("td", {}, g.shuowen ?
+            `${esc(g.shuowen.gloss)}（${esc(g.shuowen.radical)}，${esc(g.shuowen.fanqie)}）` :
+            el("span", { class: "dim" }, "无载")),
+          el("td", {}, (g.erya || []).length ?
+            g.erya.map((e2) => el("div", {}, `${e2.members.slice(0, 8).join("、")}，${e2.gloss}`)) :
+            el("span", { class: "dim" }, "—"))))),
+      el("div", { class: "dim" }, "来源：" + esc(d.source))));
+  };
+  input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") run(); });
+  main.replaceChildren(el("h2", {}, "字义训诂（说文解字 9,829 条 + 尔雅 19 篇，C层旁证）"),
+    el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "查字")), out);
+};
+
 views.rhyme = async (main) => {
   const input = el("input", { placeholder: "单字，如：天 / 秋 / 愁", maxlength: "2" });
   const out = el("div", {});
@@ -448,8 +484,10 @@ views.about = async (main) => {
       "· 意象规则逐字回源，失败进入 rejected/；对抗性测试注入伪造证据并断言其被拒绝\n" +
       "· 纯 Python 标准库实现，零第三方依赖，离线可全功能运行\n" +
       "· 可选接入 Anthropic/OpenAI 等真实大模型（LiteLLM），所有生成内容过引用核验\n\n" +
-      "数据源：chinese-poetry（MIT）、PoetryMTEB/ChineseClassicalPoetryDatabase（D层样本）、OpenCC 字表（简繁归一）。\n" +
-      "架构参照：Shanghan-Hermes（伤寒-赫尔墨斯）。"));
+      "数据源（三源实质纳入）：chinese-poetry（MIT，A层核心语料）；" +
+      "PoetryMTEB（D层外部分析，3,084 首双向回源绑定）；" +
+      "gujilab/chinese-classical-corpus（CC0，说文解字 9,829 条 + 尔雅训释 → C层训诂）；" +
+      "OpenCC 字表（简繁归一）。\n架构参照：Shanghan-Hermes（伤寒-赫尔墨斯）。"));
 };
 
 /* ── 路由 ───────────────────────────────────────────────────────── */

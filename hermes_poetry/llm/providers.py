@@ -99,6 +99,7 @@ _RE_AUTHOR_Q = re.compile(r"(?:诗风|生平|小传|哪些诗|档案|风格)")
 _RE_INTERTEXT_Q = re.compile(r"(?:化用|袭用|互文|相似|出处相近|重出)")
 _RE_MATCH_Q = re.compile(r"(?:推荐|荐诗|想家|思乡|心情|适合|表达.{0,4}的诗)")
 _RE_TEACH_Q = re.compile(r"(?:学习|入门|教学|讲讲|介绍一下)")
+_RE_GLOSS_Q = re.compile(r"(?:训诂|说文|本义|字义|([㐀-鿿])字?(?:是什么意思|的意思|何解))")
 
 
 class LocalProvider:
@@ -128,6 +129,18 @@ class LocalProvider:
                 q = m.get("content") or ""
                 break
         names = {t["function"]["name"] for t in tools}
+        # SkillRAG 路由提示（正则路由无命中时的兜底）
+        hint_tool, hint_args = "", {}
+        for m in messages:
+            content = m.get("content") or ""
+            if m.get("role") == "system" and "路由提示（SkillRAG）" in content:
+                tm_ = re.search(r"建议工具 (\w+)，参数 (\{.*?\})。", content)
+                if tm_:
+                    hint_tool = tm_.group(1)
+                    try:
+                        hint_args = json.loads(tm_.group(2))
+                    except json.JSONDecodeError:
+                        hint_args = {}
 
         def call(name: str, args: Dict) -> ChatResult:
             if name not in names:
@@ -143,6 +156,10 @@ class LocalProvider:
             return call("poetry_intertext", {"poem_ref": f"《{title.group(1)}》"})
         if title:
             return call("poetry_poem", {"poem_ref": f"《{title.group(1)}》"})
+        gm = _RE_GLOSS_Q.search(q)
+        if gm:
+            chars = gm.group(1) or "".join(re.findall(r"[「『\"]([㐀-鿿]{1,4})[」』\"]", q)) or q
+            return call("poetry_gloss", {"chars": chars[:8]})
         if _RE_CIPAI_Q.search(q):
             cp = re.sub(r"的?(?:词牌|定格|格式).*$", "", q).strip()
             return call("poetry_cipai", {"cipai": cp[-6:] if cp else q})
@@ -161,6 +178,9 @@ class LocalProvider:
             return call("poetry_match", {"mood": q})
         if _RE_TEACH_Q.search(q):
             return call("poetry_teach", {"topic": q})
+        if hint_tool in names and (hint_args or hint_tool in
+                                   ("poetry_match", "poetry_rhyme", "poetry_search")):
+            return call(hint_tool, hint_args or {"query": q})
         return call("poetry_search", {"query": q})
 
     # ── 组稿（第二步：只引用工具证据）────────────────────────────
@@ -246,6 +266,21 @@ class LocalProvider:
             return "互文检测：\n" + "\n".join(
                 f"- {x.get('mode')}「{x.get('shared_span')}」：{x.get('source_poem_id')} ↔ {x.get('target_poem_id')}"
                 for x in ps[:5])
+        if payload.get("glosses"):
+            parts_g = []
+            for g in payload["glosses"][:6]:
+                sw = g.get("shuowen")
+                seg = f"「{g['char']}」"
+                if sw:
+                    seg += f"说文：{sw['gloss']}（{sw.get('radical','')}，{sw.get('fanqie','')}）"
+                if g.get("erya"):
+                    e0 = g["erya"][0]
+                    seg += f"；尔雅·{e0['chapter']}：{'、'.join(e0['members'][:6])}，{e0['gloss']}"
+                if not sw and not g.get("erya"):
+                    seg += "字书无载"
+                parts_g.append(seg)
+            return ("字义训诂（C层，说文解字/尔雅，gujilab CC0）：\n" + "\n".join(parts_g)
+                    + f"\n{payload.get('note','')}")
         if payload.get("stats"):
             return "语料统计：" + json.dumps(payload["stats"], ensure_ascii=False)
         if payload.get("analysis"):

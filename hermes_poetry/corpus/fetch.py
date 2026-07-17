@@ -32,7 +32,8 @@ EXTERNAL_DATASETS = [
      "note": "96.5 万首＋LLM 分析层（parquet）；种子样本已内置 data/raw/hf_poetrymteb/"},
     {"name": "gujilab/chinese-classical-corpus",
      "url": "https://huggingface.co/datasets/gujilab/chinese-classical-corpus",
-     "note": "十三经+二十四史+197 万条古译今指令对（CC0），可作旁证层扩展"},
+     "note": "十三经+二十四史+197 万条古译今指令对（CC0）；其说文解字 9829 条与"
+             "尔雅 19 篇已抽取入 data/raw/gujilab/ 作 C 层训诂（poetry_gloss 工具）"},
 ]
 
 

@@ -84,7 +84,6 @@ def verify_evidence(rule: InitialRule, store: PoemStore) -> Tuple[bool, List[str
     if not any(contains_verbatim(h, rule.evidence_span) for h in haystacks if h):
         flags.append("evidence:span_not_in_source")
     # IF 侧逐项回源
-    span_folded = t2s(rule.evidence_span)
     for surface in rule.if_conditions.get("imagery_surface", []) or []:
         if not contains_verbatim(rule.evidence_span, surface):
             flags.append(f"evidence:imagery_not_in_span:{surface}")

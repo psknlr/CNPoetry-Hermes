@@ -22,17 +22,33 @@ RE_POEM_ID_Q = re.compile(r"CNP_[A-Z0-9]+_\d{5}")
 
 
 class PoemRAG:
-    def __init__(self, poems: List[Poem]):
+    def __init__(self, poems: List[Poem], cache_fingerprint: str = ""):
         self.poems = poems
         self.by_id: Dict[str, Poem] = {p.poem_id: p for p in poems}
         self._title_index: Dict[str, List[Poem]] = {}
         self._author_index: Dict[str, List[Poem]] = {}
-        self.index = BM25Index()
         for p in poems:
-            self.index.add(p.poem_id, f"{p.title} {p.author} {p.cipai} {t2s(p.text)}")
             self._title_index.setdefault(t2s(p.title), []).append(p)
             self._author_index.setdefault(t2s(p.author), []).append(p)
-        self.index.finalize()
+        self.index = self._build_index(cache_fingerprint)
+
+    def _build_index(self, fingerprint: str) -> BM25Index:
+        from .. import config
+        cache_path = config.INDEX_DIR / "bm25_poems.pkl"
+        if fingerprint:
+            cached = BM25Index.load(cache_path, fingerprint)
+            if cached is not None and len(cached.doc_ids) == len(self.poems):
+                return cached
+        index = BM25Index()
+        for p in self.poems:
+            index.add(p.poem_id, f"{p.title} {p.author} {p.cipai} {t2s(p.text)}")
+        index.finalize()
+        if fingerprint:
+            try:
+                index.dump(cache_path, fingerprint)
+            except OSError:
+                pass
+        return index
 
     # ── 查询解析 ────────────────────────────────────────────────
     def _query_imagery(self, q: str) -> List[str]:

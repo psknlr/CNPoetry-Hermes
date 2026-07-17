@@ -30,7 +30,7 @@ class Engine:
                 "规则库未生成：请先运行 `python3 -m hermes_poetry pipeline`，"
                 f"或设 HERMES_POETRY_DATA 指向数据目录（当前 {config.DATA_DIR}）。")
         self.by_id: Dict[str, Poem] = {p.poem_id: p for p in self.poems}
-        self.rag = PoemRAG(self.poems)
+        self.rag = PoemRAG(self.poems, cache_fingerprint=self._corpus_fingerprint())
         self.imagery_profiles = {r["imagery"]: r for r in read_jsonl(config.RULES_IMAGERY_DIR / "imagery_profiles.jsonl")}
         self.theme_profiles = {r["theme"]: r for r in read_jsonl(config.RULES_THEME_DIR / "theme_profiles.jsonl")}
         self.cipai_profiles = {t2s(r["cipai"]): r for r in read_jsonl(config.RULES_CIPAI_DIR / "cipai_profiles.jsonl")}
@@ -38,6 +38,13 @@ class Engine:
         self.rhyme_rules = read_jsonl(config.RULES_RHYME_DIR / "rhyme_partners.jsonl")
         self.intertext_rules = read_jsonl(config.RULES_INTERTEXT_DIR / "intertext_rules.jsonl")
         self.external = {str(e.get("id")): e for e in sources.load_external_analysis()}
+        self.shuowen = sources.load_shuowen()
+        self.erya = sources.load_erya_glosses()
+        self._erya_index: Dict[str, List[int]] = {}
+        for i, g in enumerate(self.erya):
+            for m in g["members"]:
+                if len(m) == 1:
+                    self._erya_index.setdefault(t2s(m), []).append(i)
         self._ext_by_poem: Dict[str, Dict] = {}
         for r in read_jsonl(config.RULES_INITIAL_DIR / "initial_rules.jsonl"):
             if r.get("rule_type") == "external_analysis_rule":
@@ -48,6 +55,15 @@ class Engine:
             self.manifest = json.loads((config.MANIFEST_DIR / "corpus_manifest.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             self.manifest = {}
+
+    @staticmethod
+    def _corpus_fingerprint() -> str:
+        """poems.jsonl 的轻量指纹（大小+mtime），语料变更即缓存失效。"""
+        try:
+            st = (config.POEM_DIR / "poems.jsonl").stat()
+            return f"{st.st_size}:{int(st.st_mtime)}"
+        except OSError:
+            return ""
 
     # ── 基础 ────────────────────────────────────────────────────
     def resolve_poem(self, ref: str) -> Optional[Poem]:
@@ -312,6 +328,41 @@ class Engine:
                         "note": "无逐字互文命中，给出最近似检索结果。"}
             return {"text": text, "pairs": pairs[:10]}
         return {"error": "需提供 poem_ref 或 text。"}
+
+    # ── 字义训诂（C层：说文解字 + 尔雅，gujilab CC0）──────────────
+    def gloss_query(self, chars: str = "", poem_ref: str = "") -> Dict:
+        targets: List[str] = []
+        context = ""
+        if poem_ref:
+            p = self.resolve_poem(poem_ref)
+            if p is None:
+                return {"error": f"无法解析作品「{poem_ref}」。"}
+            context = p.poem_id
+            from collections import Counter as _C
+            from ..textutil import cjk_chars
+            freq = _C(cjk_chars(p.text))
+            targets = [c for c, _ in freq.most_common(8)]
+        else:
+            from ..textutil import cjk_chars
+            targets = cjk_chars(chars)[:8]
+        if not targets:
+            return {"error": "需提供 chars（1-8 个汉字）或 poem_ref。"}
+        entries = []
+        for ch in targets:
+            key = t2s(ch)
+            sw = self.shuowen.get(key) or self.shuowen.get(ch)
+            erya_hits = [self.erya[i] for i in self._erya_index.get(key, [])[:3]]
+            entries.append({
+                "char": ch,
+                "shuowen": ({"headword": sw["char"], "radical": sw.get("radical", ""),
+                             "fanqie": sw.get("fanqie", ""), "gloss": sw.get("gloss", "")}
+                            if sw else None),
+                "erya": [{"chapter": g["chapter"], "members": g["members"][:12],
+                          "gloss": g["gloss"]} for g in erya_hits],
+            })
+        return {"glosses": entries, "poem_id": context, "layer": "C",
+                "source": "说文解字/尔雅（gujilab/chinese-classical-corpus，CC0）",
+                "note": "训诂为字书本义，诗中用义可能引申；本层为 C 层旁证。"}
 
     # ── 研究端 ───────────────────────────────────────────────────
     def research(self, topic: str = "") -> Dict:
