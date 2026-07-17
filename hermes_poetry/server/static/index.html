@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>诗海赫尔墨斯 · Hermes-CNPoetry</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">诗海<span>赫尔墨斯</span></div>
+  <div class="badges">
+    <span id="badge-backend" class="badge">后端…</span>
+    <span id="badge-poems" class="badge">语料…</span>
+  </div>
+</header>
+<div id="layout">
+  <nav id="nav">
+    <button data-view="dashboard" class="active">总览</button>
+    <button data-view="agent">智能体</button>
+    <button data-view="council">多智能体合议</button>
+    <button data-view="search">原文检索</button>
+    <button data-view="match">情境荐诗</button>
+    <button data-view="differential">对比鉴赏</button>
+    <button data-view="teach">教学</button>
+    <button data-view="imagery">意象档案</button>
+    <button data-view="cipai">词牌定格</button>
+    <button data-view="author">诗人档案</button>
+    <button data-view="rhyme">韵伴聚类</button>
+    <button data-view="intertext">互文检测</button>
+    <button data-view="research">研究端</button>
+    <button data-view="skills">Skill 库</button>
+    <button data-view="about">关于</button>
+  </nav>
+  <main id="main"></main>
+</div>
+<aside id="drawer" class="hidden">
+  <div id="drawer-head"><button id="drawer-close">✕ 关闭</button></div>
+  <div id="drawer-body"></div>
+</aside>
+<footer id="foot">Hermes-CNPoetry · 无原文，不成论断 · 证据层级 A原文/B计量/C旁证/D外部分析/E模型解释</footer>
+<script src="/app.js"></script>
+</body>
+</html>
