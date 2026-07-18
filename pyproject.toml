@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-cnpoetry"
+dynamic = ["version"]
+description = "Hermes-CNPoetry: autonomous rule mining and skill generation system for classical Chinese poetry"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "CNPoetry-Hermes contributors" }]
+keywords = ["chinese poetry", "classical Chinese", "knowledge mining", "RAG", "agents", "litellm"]
+
+# Core has ZERO runtime dependencies and works fully offline (local backend).
+dependencies = []
+
+# ── 数据部署 ────────────────────────────────────────────────
+# 本 wheel 只含代码不含语料/规则资产（data/ 不随包分发）。
+# 独立安装后系统不会静默空运行：ToolRegistry 构建前有 assert_ready 响亮拦截，
+# 服务端提供 /livez 与 /readyz 分离探针（`hermes-cnpoetry readyz`）。
+# 数据就绪二选一：
+#   1. git clone 本仓库（种子语料随库提交，manifest sha256 即版本指纹）；
+#   2. wheel + 独立分发的数据目录，设 HERMES_POETRY_DATA 指向它。
+
+[project.optional-dependencies]
+# Enables real LLMs via LiteLLM (100+ providers). Without it the system
+# transparently uses the deterministic `local` backend.
+llm = ["litellm>=1.40"]
+
+[project.scripts]
+hermes-cnpoetry = "hermes_poetry.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "hermes_poetry._version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["hermes_poetry*"]

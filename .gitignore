@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+# 生成产物不入库：data/raw 是事实源，`python3 -m hermes_poetry pipeline`
+# 零依赖确定性重建全部规则资产（约 40 秒）。
+data/poetry/
+data/skills/
+.venv/
+venv/
+.DS_Store
