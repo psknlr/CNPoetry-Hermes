@@ -114,6 +114,22 @@ class ServiceContext:
     def run_council(self, body: Dict) -> Dict:
         return self.council.deliberate(body.get("question", ""), role=body.get("role", ""))
 
+    def compose(self, body: Dict) -> Dict:
+        from ..apps.compose import compose_helper
+        return compose_helper(genre=body.get("genre", "七绝"),
+                              rhyme_char=body.get("rhyme_char", ""),
+                              mood=body.get("mood", ""),
+                              avoid_imagery=body.get("avoid_imagery"),
+                              engine=self.engine)
+
+    def check_draft(self, body: Dict) -> Dict:
+        from ..apps.compose import check_draft
+        lines = [ln.strip() for ln in (body.get("lines") or []) if ln and ln.strip()]
+        if not lines:
+            return {"error": {"code": "EMPTY_DRAFT", "message": "请提供草稿诗句（每行一句）",
+                              "recoverable": True}}
+        return check_draft(lines, genre=body.get("genre", ""))
+
     def tool(self, body: Dict) -> Dict:
         return self.registry.call(body.get("name", ""), body.get("arguments") or {})
 
