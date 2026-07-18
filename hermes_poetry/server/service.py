@@ -80,18 +80,30 @@ class ServiceContext:
     def imagery(self, body: Dict) -> Dict:
         name = body.get("imagery", "")
         prof = self.engine.imagery_profiles.get(name)
-        return {"imagery_profile": prof} if prof else \
-            {"error": f"无意象档案「{name}」", "available": list(self.engine.imagery_profiles)}
+        if prof is None:
+            return {"error": f"无意象档案「{name}」", "available": list(self.engine.imagery_profiles)}
+        out: Dict = {"imagery_profile": prof}
+        if body.get("all_examples"):
+            out["all_examples"] = self.engine.imagery_examples(name)
+        return out
+
+    def feihua(self, body: Dict) -> Dict:
+        return self.engine.feihua(body.get("char", ""),
+                                  exclude_ids=body.get("exclude_ids") or [],
+                                  user_line=body.get("user_line", ""),
+                                  round_no=int(body.get("round_no", 0)))
 
     def cipai(self, body: Dict) -> Dict:
-        from ..textutil import t2s
-        prof = self.engine.cipai_profiles.get(t2s(body.get("cipai", "")))
-        return {"cipai_profile": prof} if prof else {"error": "无该词牌档案"}
+        return self.engine.cipai_query(body.get("cipai", ""))
 
     def author(self, body: Dict) -> Dict:
-        from ..textutil import t2s
-        prof = self.engine.author_profiles.get(t2s(body.get("author", "")))
-        return {"author_profile": prof} if prof else {"error": "无该诗人档案"}
+        r = self.engine.resolve_author(body.get("author", ""))
+        if r["status"] != "unique":
+            return {"error": {"code": "AUTHOR_NOT_FOUND",
+                              "message": f"无诗人「{body.get('author', '')}」的档案",
+                              "recoverable": True, "candidates": r.get("suggestions", [])}}
+        return {"author_profile": self.engine.author_profiles[r["author"]],
+                "resolved_via": r["via"]}
 
     def rhyme(self, body: Dict) -> Dict:
         return self.engine.rhyme_query(body.get("char", ""), body.get("poem_ref", ""))
@@ -115,11 +127,22 @@ class ServiceContext:
         return self.council.deliberate(body.get("question", ""), role=body.get("role", ""))
 
     def compose(self, body: Dict) -> Dict:
-        from ..apps.compose import compose_helper
+        from ..apps.compose import compose_cipai, compose_helper
+        if body.get("cipai"):
+            return compose_cipai(body["cipai"], engine=self.engine)
         return compose_helper(genre=body.get("genre", "七绝"),
                               rhyme_char=body.get("rhyme_char", ""),
                               mood=body.get("mood", ""),
                               avoid_imagery=body.get("avoid_imagery"),
+                              imagery=body.get("imagery"),
+                              engine=self.engine)
+
+    def compose_gufeng(self, body: Dict) -> Dict:
+        from ..apps.compose import compose_gufeng
+        return compose_gufeng(theme=body.get("theme", ""),
+                              rhyme_char=body.get("rhyme_char", ""),
+                              n_lines=int(body.get("n_lines", 16)),
+                              requirements=body.get("requirements", ""),
                               engine=self.engine)
 
     def check_draft(self, body: Dict) -> Dict:

@@ -89,13 +89,100 @@ class ScriptedProvider:
         return ChatResult(content=str(item), backend="scripted")
 
 
+# ── OpenAI 兼容原生后端（纯标准库，Azure/Poe/MiniMax/任意兼容端点）────
+
+class OpenAICompatProvider:
+    """通过 urllib 直连 OpenAI 兼容 chat/completions 端点，支持工具调用。
+
+    预置（HERMES_LLM_BACKEND）：
+      azure   → {AZURE_OPENAI_ENDPOINT}/openai/deployments/{model}/chat/completions
+                 ?api-version={AZURE_OPENAI_API_VERSION}，鉴权头 api-key
+      poe     → https://api.poe.com/v1/chat/completions，Bearer POE_API_KEY
+      minimax → https://api.minimax.chat/v1/text/chatcompletion_v2，Bearer MINIMAX_API_KEY
+      openai_compat → HERMES_LLM_BASE_URL + /chat/completions，Bearer HERMES_LLM_API_KEY
+    """
+
+    def __init__(self, settings, preset: str = "openai_compat"):
+        self.settings = settings
+        self.preset = preset
+        self.url, self.headers = self._endpoint(preset, settings)
+
+    @staticmethod
+    def _endpoint(preset, settings):
+        model = settings.model
+        if preset == "azure":
+            base = os.environ.get("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
+            key = os.environ.get("AZURE_OPENAI_API_KEY") or os.environ.get("AZURE_API_KEY", "")
+            ver = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-06-01")
+            if not (base and key):
+                raise RuntimeError("azure 后端需要 AZURE_OPENAI_ENDPOINT 与 AZURE_OPENAI_API_KEY")
+            return (f"{base}/openai/deployments/{model}/chat/completions?api-version={ver}",
+                    {"api-key": key, "Content-Type": "application/json"})
+        if preset == "poe":
+            key = os.environ.get("POE_API_KEY", "")
+            if not key:
+                raise RuntimeError("poe 后端需要 POE_API_KEY")
+            return ("https://api.poe.com/v1/chat/completions",
+                    {"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        if preset == "minimax":
+            key = os.environ.get("MINIMAX_API_KEY", "")
+            if not key:
+                raise RuntimeError("minimax 后端需要 MINIMAX_API_KEY")
+            base = os.environ.get("MINIMAX_BASE_URL", "https://api.minimax.chat/v1")
+            return (f"{base.rstrip('/')}/text/chatcompletion_v2",
+                    {"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        base = os.environ.get("HERMES_LLM_BASE_URL", "").rstrip("/")
+        key = os.environ.get("HERMES_LLM_API_KEY", "")
+        if not base:
+            raise RuntimeError("openai_compat 后端需要 HERMES_LLM_BASE_URL")
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return (f"{base}/chat/completions", headers)
+
+    def chat(self, messages, tools=None, temperature=0.0, json_mode=False,
+             task=None, context=None) -> ChatResult:
+        import urllib.request
+        payload: Dict[str, Any] = {
+            "model": self.settings.model, "messages": messages,
+            "temperature": temperature, "max_tokens": self.settings.max_tokens,
+        }
+        if tools:
+            payload["tools"] = tools
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        req = urllib.request.Request(
+            self.url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=self.headers, method="POST")
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("base_resp", {}).get("status_code") not in (None, 0):  # MiniMax 错误面
+            raise RuntimeError(f"minimax 错误：{data['base_resp']}")
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        calls = []
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            calls.append(ToolCall(id=tc.get("id") or f"call_{len(calls)}",
+                                  name=fn.get("name", ""), arguments=args))
+        usage = data.get("usage") or {}
+        return ChatResult(content=msg.get("content") or "", tool_calls=calls,
+                          usage={"prompt_tokens": usage.get("prompt_tokens", 0),
+                                 "completion_tokens": usage.get("completion_tokens", 0)},
+                          backend=self.preset, raw=data)
+
+
 # ── 确定性本地后端 ───────────────────────────────────────────────────
 
 _RE_CIPAI_Q = re.compile(r"(?:词牌|定格|格式)")
 _RE_METRIC_Q = re.compile(r"(?:格律|平仄|押韵|韵脚|体裁|几言|绝句|律诗)")
 _RE_IMAGERY_Q = re.compile(r"(?:意象|象征|代表什么|含义)")
 _RE_DIFF_Q = re.compile(r"(?:对比|比较|异同|区别|鉴别)")
-_RE_AUTHOR_Q = re.compile(r"(?:诗风|生平|小传|哪些诗|档案|风格)")
+_RE_AUTHOR_Q = re.compile(r"(?:诗风|生平|小传|哪些诗|档案|风格|代表作|名篇|名作|写过)")
 _RE_INTERTEXT_Q = re.compile(r"(?:化用|袭用|互文|相似|出处相近|重出)")
 _RE_MATCH_Q = re.compile(r"(?:推荐|荐诗|想家|思乡|心情|适合|表达.{0,4}的诗)")
 _RE_TEACH_Q = re.compile(r"(?:学习|入门|教学|讲讲|介绍一下)")
@@ -180,7 +267,15 @@ class LocalProvider:
                 if surface in folded:
                     return call("poetry_imagery", {"imagery": canon})
         if _RE_AUTHOR_Q.search(q):
-            return call("poetry_author", {"author": re.sub(r"的.*$", "", q).strip()[:6]})
+            # 命中已知诗人名/字号别名则精确取名（苏东坡有哪些代表作 → 苏东坡）
+            from ..lexicon import AUTHOR_ALIASES
+            from ..textutil import t2s
+            folded = t2s(q)
+            known = sorted(set(AUTHOR_ALIASES) | set(AUTHOR_ALIASES.values()),
+                           key=len, reverse=True)
+            name = next((n for n in known if n in folded), "")
+            return call("poetry_author",
+                        {"author": name or re.sub(r"的.*$", "", q).strip()[:6]})
         if _RE_MATCH_Q.search(q):
             return call("poetry_match", {"mood": q})
         if _RE_TEACH_Q.search(q):

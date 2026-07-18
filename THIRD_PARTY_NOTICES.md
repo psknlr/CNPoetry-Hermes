@@ -39,6 +39,15 @@
 - 用途：B 层中古音韵计量（平仄/韵部/律则检测）；平水韵 106 部与词林正韵
   19 部由内嵌规范并表推导（见 `hermes_poetry/extract/phonology.py`）。
 
+## 4a. 龙榆生《唐宋词格律》整理数据（`data/raw/longyusheng/`）
+
+- 来源：longyusheng.org 站点开源仓库（数字化工程以 AGPL-3.0 发布）；
+  《唐宋词格律》原书为龙榆生（1902–1966）词学著作。
+- 内容：153 调词谱（调名/异名/类别/说明/定格与变格符号谱）之结构化转写，
+  谱面内容未改动；本仓库保留该目录数据的原始许可归属，详见目录内 README。
+- 用途：创作实验室与词牌定格的「词谱权威层」，与语料归纳定格并列展示；
+  输出恒标 `source_level: 词谱权威（龙榆生）`。
+
 ## 5. OpenCC 繁简对照表（`data/raw/charmap/TSCharacters.txt`）
 
 - 来源：https://github.com/BYVoid/OpenCC

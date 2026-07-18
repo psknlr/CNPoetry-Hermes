@@ -52,7 +52,9 @@ route("POST", "/api/research", "research")
 route("POST", "/api/ask", "ask")
 route("POST", "/api/council", "run_council")
 route("POST", "/api/compose", "compose")
+route("POST", "/api/compose_gufeng", "compose_gufeng")
 route("POST", "/api/check_draft", "check_draft")
+route("POST", "/api/feihua", "feihua")
 route("POST", "/api/tool", "tool")
 
 _MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",

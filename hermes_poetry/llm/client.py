@@ -14,10 +14,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .. import config
-from .providers import ChatResult, LiteLLMProvider, LocalProvider, ScriptedProvider
+from .providers import (ChatResult, LiteLLMProvider, LocalProvider,
+                        OpenAICompatProvider, ScriptedProvider)
 
 _PROVIDER_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AZURE_API_KEY",
                   "POE_API_KEY", "MINIMAX_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY")
+# 原生直连后端（无需 litellm）：Azure OpenAI / Poe / MiniMax / 任意 OpenAI 兼容端点
+NATIVE_BACKENDS = ("azure", "poe", "minimax", "openai_compat")
+REAL_BACKENDS = ("litellm",) + NATIVE_BACKENDS
 
 
 @dataclass
@@ -41,8 +45,18 @@ class LLMSettings:
 
     def resolve_backend(self) -> str:
         b = (self.backend or "auto").lower()
-        if b in ("litellm", "local", "scripted"):
+        if b in ("litellm", "local", "scripted") + NATIVE_BACKENDS:
             return b
+        # auto：先原生直连（按专属环境变量），再 litellm，最后 local
+        if os.environ.get("AZURE_OPENAI_ENDPOINT") and (
+                os.environ.get("AZURE_OPENAI_API_KEY") or os.environ.get("AZURE_API_KEY")):
+            return "azure"
+        if os.environ.get("POE_API_KEY"):
+            return "poe"
+        if os.environ.get("MINIMAX_API_KEY"):
+            return "minimax"
+        if os.environ.get("HERMES_LLM_BASE_URL"):
+            return "openai_compat"
         try:
             import litellm  # noqa: F401
         except Exception:
@@ -72,12 +86,18 @@ class LLMClient:
     @property
     def available(self) -> bool:
         """是否接入真实大模型（local 为确定性后端，不算）。"""
-        return self._backend == "litellm"
+        return self._backend in REAL_BACKENDS
 
     def _build_provider(self, backend: str):
         if backend == "litellm":
             try:
                 return LiteLLMProvider(self.settings)
+            except Exception:
+                self._backend = "local"
+                return LocalProvider(self.settings)
+        if backend in NATIVE_BACKENDS:
+            try:
+                return OpenAICompatProvider(self.settings, preset=backend)
             except Exception:
                 self._backend = "local"
                 return LocalProvider(self.settings)
@@ -89,7 +109,7 @@ class LLMClient:
              json_mode: bool = False, task: Optional[str] = None,
              context: Optional[Dict] = None, use_cache: bool = True) -> ChatResult:
         temp = self.settings.temperature if temperature is None else temperature
-        cacheable = (use_cache and self.settings.cache and self._backend == "litellm"
+        cacheable = (use_cache and self.settings.cache and self._backend in REAL_BACKENDS
                      and temp == 0.0 and not tools)
         key = None
         if cacheable:
@@ -106,7 +126,7 @@ class LLMClient:
                                       json_mode=json_mode, task=task, context=context)
         except Exception as exc:
             self.usage["errors"] += 1
-            if self.settings.fallback == "local" and self._backend == "litellm":
+            if self.settings.fallback == "local" and self._backend in REAL_BACKENDS:
                 fell_back = True
                 res = LocalProvider(self.settings).chat(messages, tools=tools, temperature=temp,
                                                         json_mode=json_mode, task=task, context=context)
@@ -117,9 +137,9 @@ class LLMClient:
         self.usage["calls"] += 1
         for k in ("prompt_tokens", "completion_tokens"):
             self.usage[k] += int(res.usage.get(k, 0))
-        # 回退产物绝不落入 litellm 缓存——一次瞬时故障不得永久污染该问题
+        # 回退产物绝不落入真实后端缓存——一次瞬时故障不得永久污染该问题
         if cacheable and key and not res.tool_calls and not fell_back \
-                and res.backend == "litellm":
+                and res.backend in REAL_BACKENDS:
             self._cache_store(key, {"content": res.content, "usage": res.usage})
         return res
 
