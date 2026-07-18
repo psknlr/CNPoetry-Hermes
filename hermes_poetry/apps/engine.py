@@ -16,7 +16,10 @@ from ..extract import metrics as metrics_mod
 from ..lexicon import IMAGERY, MOOD_HINTS, THEMES, IMAGERY_SURFACE, EMOTION_SURFACE
 from ..rag.poem_rag import PoemRAG
 from ..schemas import Poem, read_jsonl
-from ..textutil import t2s
+from ..textutil import content_only, t2s
+
+import re as _re
+RE_POEM_ID_ONLY = _re.compile(r"^CNP_[A-Z0-9]+_\d{5}$")
 
 
 class Engine:
@@ -92,20 +95,64 @@ class Engine:
     def resolve(self, ref: str) -> Dict:
         """统一消歧结果：{status: unique|ambiguous|not_found, candidates, selected}。
 
-        事实核验类调用必须走本接口——同题异作时绝不按默认排序取首。
+        歧义口径（第三轮复审收紧）：同题多首即歧义——含**同作者同题**
+        （组诗/同题异作）与**同作者同题异文**（版本歧义，如两种《静夜思》），
+        不再以「作者不同」为歧义唯一条件。消歧语法：
+          《题名》@作者          作者唯一一首时定解
+          《题名》@作者#首句片段  版本/组诗定解
+          poem_id               精确定解
         """
-        p = self.resolve_poem(ref)
         bare = (ref or "").strip()
-        if "@" in bare or bare.startswith("CNP_"):
+        first_hint = ""
+        if "#" in bare:
+            bare, _, first_hint = bare.partition("#")
+            bare = bare.strip()
+            first_hint = t2s(first_hint.strip())
+        if bare.startswith("CNP_") or (("@" not in bare) and RE_POEM_ID_ONLY.match(bare or "")):
+            p = self.resolve_poem(bare)
             return ({"status": "unique", "selected": p, "candidates": [p]} if p
                     else {"status": "not_found", "selected": None, "candidates": []})
+        author_hint = ""
+        if "@" in bare:
+            title_part, _, author_hint = bare.partition("@")
+            author_hint = t2s(author_hint.strip())
+            bare = title_part.strip()
         cands = self.resolve_candidates(bare)
-        authors = {t2s(c.author) for c in cands}
-        if len(cands) > 1 and len(authors) > 1:
-            return {"status": "ambiguous", "selected": None, "candidates": cands[:8]}
-        if p is None:
-            return {"status": "not_found", "selected": None, "candidates": []}
-        return {"status": "unique", "selected": p, "candidates": cands or [p]}
+        if author_hint:
+            cands = [c for c in cands if t2s(c.author) == author_hint]
+        if first_hint:
+            from ..textutil import contains_verbatim
+            cands = [c for c in cands
+                     if c.lines and contains_verbatim(c.lines[0], first_hint)]
+        if not cands:
+            p = self.resolve_poem(ref)
+            return ({"status": "unique", "selected": p, "candidates": [p]} if p
+                    else {"status": "not_found", "selected": None, "candidates": []})
+        if len(cands) == 1:
+            return {"status": "unique", "selected": cands[0], "candidates": cands}
+        # 多候选：正文相同的重复才视为同一（保守），否则歧义
+        texts = {content_only(t2s(c.text)) for c in cands}
+        if len(texts) == 1:
+            return {"status": "unique", "selected": cands[0], "candidates": cands}
+        return {"status": "ambiguous", "selected": None, "candidates": cands[:8]}
+
+    def require_unique(self, ref: str):
+        """工具层统一入口：唯一 → Poem；否则结构化错误（含消歧提示）。
+
+        业务模块不得再直接调用 resolve_poem 静默取首。"""
+        res = self.resolve(ref)
+        if res["status"] == "unique":
+            return res["selected"], None
+        if res["status"] == "ambiguous":
+            return None, self.err(
+                "POEM_AMBIGUOUS",
+                f"「{ref}」有多首候选（含同作者同题/异文版本），请用 @作者 或 @作者#首句 定解",
+                candidates=[{"poem_id": c.poem_id, "author": c.author, "dynasty": c.dynasty,
+                             "book": c.book,
+                             "first_line": c.lines[0] if c.lines else "",
+                             "ref": f"《{c.title}》@{c.author}#" + (c.lines[0][:5] if c.lines else "")}
+                            for c in res["candidates"][:6]])
+        return None, self.err("POEM_NOT_FOUND", f"无法解析作品「{ref}」")
 
     def resolve_poem(self, ref: str) -> Optional[Poem]:
         """支持消歧语法：《题名》@作者（如 《春晓》@孟浩然）。"""
@@ -411,9 +458,9 @@ class Engine:
         targets: List[str] = []
         context = ""
         if poem_ref:
-            p = self.resolve_poem(poem_ref)
-            if p is None:
-                return {"error": f"无法解析作品「{poem_ref}」。"}
+            p, err = self.require_unique(poem_ref)
+            if err:
+                return err
             context = p.poem_id
             from collections import Counter as _C
             from ..textutil import cjk_chars
@@ -443,9 +490,9 @@ class Engine:
 
     # ── 诗境（进入一首诗：逐句多层注解 + 情感曲线）─────────────────
     def scene(self, ref: str) -> Dict:
-        p = self.resolve_poem(ref)
-        if p is None:
-            return self.err("POEM_NOT_FOUND", f"无法解析作品「{ref}」")
+        p, err = self.require_unique(ref)
+        if err:
+            return err
         from ..extract.annotate import annotate_line
         from ..extract.phonology import get_phonology
         from ..induce.allusions import detect_allusions
@@ -470,10 +517,11 @@ class Engine:
             duizhang = analyze_regulated(p.lines)
         return {"poem": {"poem_id": p.poem_id, "title": p.title, "author": p.author,
                          "dynasty": p.dynasty, "genre": p.genre},
-                "lines": lines_out, "emotion_curve": curve,
+                "lines": lines_out, "emotion_marker_density": curve,
                 "couplets": duizhang, "layer_legend": config.LAYER_LABEL,
-                "note": "逐句标注均为确定性层（A字面/B音韵/种子典故）；"
-                        "语篇与诗学层解释见五层标注器（需真实大模型）。"}
+                "note": "逐句标注均为确定性层（A字面/B音韵/种子典故候选）。"
+                        "emotion_marker_density 为情感词表命中密度（正向计数−否定计数），"
+                        "不是效价/唤醒度等真实情感维度——篇章情感建模见路线图。"}
 
     # ── 研究端 ───────────────────────────────────────────────────
     def research(self, topic: str = "") -> Dict:

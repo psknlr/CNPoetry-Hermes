@@ -1,6 +1,22 @@
 /* 诗海赫尔墨斯控制台（原生 JS 单页应用，无构建、无 CDN、离线可用） */
 "use strict";
 
+/* ── 昼夜主题 ───────────────────────────────────────────────────── */
+(function themeInit() {
+  const btn = document.querySelector("#theme-toggle");
+  const apply = (t) => {
+    if (t === "dark") document.documentElement.setAttribute("data-theme", "dark");
+    else document.documentElement.removeAttribute("data-theme");
+    btn.textContent = t === "dark" ? "昼" : "夜";
+  };
+  apply(localStorage.getItem("hermes_theme") || "light");
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    localStorage.setItem("hermes_theme", next);
+    apply(next);
+  });
+})();
+
 const $ = (sel, el) => (el || document).querySelector(sel);
 const TOKEN_KEY = "hermes_cnpoetry_token";
 
@@ -18,6 +34,8 @@ function el(tag, attrs, ...children) {
   return node;
 }
 const esc = (s) => String(s == null ? "" : s);
+/* replaceChildren 会把 null 字符串化——一律经 show() 过滤 */
+const show = (box, ...nodes) => box.replaceChildren(...nodes.flat().filter(Boolean));
 const errText = (e) => {
   if (e == null) return "";
   if (typeof e === "string") return e;
@@ -63,6 +81,16 @@ function linkifyIds(text) {
   return frag;
 }
 
+/* 竖排原文（自右而左，界栏分句）：手工排列不依赖 writing-mode，跨端稳定 */
+function vpoem(lines) {
+  const cols = lines.map((ln) =>
+    el("div", { class: "vcol" }, Array.from(ln).map((ch) => el("span", {}, ch))));
+  const inner = el("div", { class: "vpoem" }, cols);
+  const wrap = el("div", { class: "vpoem-wrap" }, inner);
+  requestAnimationFrame(() => { wrap.scrollLeft = wrap.scrollWidth; });
+  return wrap;
+}
+
 async function openPoem(ref) {
   const drawer = $("#drawer"), body = $("#drawer-body");
   drawer.classList.remove("hidden");
@@ -71,13 +99,13 @@ async function openPoem(ref) {
     const d = await api.post("/api/poem", { ref });
     if (d.error) { body.textContent = errText(d.error); return; }
     const p = d.poem;
-    body.replaceChildren(
+    const blocks = [
       el("h2", {}, `《${esc(p.title)}》`),
       el("div", { class: "kv" }, `${esc(p.author)} · ${esc(p.dynasty)} · ${esc(p.book)}` +
         (p.cipai ? ` · 词牌「${esc(p.cipai)}」` : "") + ` · ${esc(p.poem_id)}`),
-      el("div", { class: "poemlines" },
+      el("div", {},
         el("span", { class: "layer A" }, "A 原文"),
-        el("div", {}, p.lines.map((ln) => el("div", {}, ln)))),
+        vpoem(p.lines)),
       el("div", { class: "card" },
         el("span", { class: "layer B" }, "B 计量"),
         el("div", { class: "kv" },
@@ -116,7 +144,8 @@ async function openPoem(ref) {
               `「${x.char}」${x.shuowen ? esc(x.shuowen.gloss) : "字书无载"}`))));
         }
       } }, "查此诗高频字训诂"),
-    );
+    ];
+    body.replaceChildren(...blocks.filter(Boolean));
   } catch (e) { body.textContent = "错误：" + e.message; }
 }
 $("#drawer-close").addEventListener("click", () => $("#drawer").classList.add("hidden"));
@@ -152,6 +181,10 @@ views.dashboard = async (main) => {
     .map(([k, v]) => el("span", { class: "tag" }, `${k} ${v}`));
   main.replaceChildren(
     el("h2", {}, "总览"),
+    el("div", { class: "card hero" },
+      el("div", { class: "hero-motto kai" }, "无原文，不成论断"),
+      el("div", { class: "kv" },
+        "把古典诗词语料转化为可回源、可推理、可比较、可教学、可研究、可调用的规则系统")),
     el("div", { class: "grid2" },
       el("div", { class: "card" }, el("h3", {}, "规则库"),
         el("div", { class: "kv" },
@@ -218,29 +251,31 @@ views.scene = async (main) => {
     out.replaceChildren(el("div", { class: "card" }, "构建诗境…"));
     const d = await api.post("/api/scene", { ref: input.value });
     if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
-    const maxAbs = Math.max(1, ...d.emotion_curve.map((v) => Math.abs(v)));
-    out.replaceChildren(
+    const maxAbs = Math.max(1, ...d.emotion_marker_density.map((v) => Math.abs(v)));
+    show(out,
       el("div", { class: "card" },
         el("h3", {}, `《${esc(d.poem.title)}》`, el("span", { class: "dim" }, `　${esc(d.poem.author)} · ${esc(d.poem.dynasty)} · ${esc(d.poem.genre)}`),
           el("span", { class: "pid", onclick: () => openPoem(d.poem.poem_id) }, " " + d.poem.poem_id)),
         ...d.lines.map((l, i) => el("div", { class: "hit" },
-          el("div", { class: "t", style: "font-size:17px" }, l.line),
+          el("div", { class: "t kai", style: "font-size:18px" }, l.line),
           el("div", { class: "meta" },
             el("span", { class: "layer B" }, l.tone_pattern || "—"),
             l.imagery.length ? "　意象：" + l.imagery.join("、") : "",
             l.emotions.length ? "　情感：" + l.emotions.join("、") : "",
             l.negated.length ? "　（否定：" + l.negated.join("、") + "）" : ""),
           l.allusions.length ? el("div", { class: "kv" },
-            "📜 " + l.allusions.map((a) => `${a.allusion}（${a.source}→${a.implies}）`).join("；")) : null,
-          el("div", { style: `height:5px;width:${Math.abs(d.emotion_curve[i]) / maxAbs * 60 + 2}%;` +
-            `background:${d.emotion_curve[i] >= 0 ? "var(--accent2)" : "var(--bad)"};border-radius:2px;margin-top:4px` })))),
+            "📜 疑似用典（候选，待语境确认）：" + l.allusions.map((a) =>
+              `${a.allusion}〔典源候选：${a.source}｜常用义：${a.implies}` +
+              (a.ambiguity_note ? `｜⚠ ${a.ambiguity_note}` : "") + "〕").join("；")) : null,
+          el("div", { class: "bar " + (d.emotion_marker_density[i] >= 0 ? "pos" : "neg"),
+            style: `width:${Math.abs(d.emotion_marker_density[i]) / maxAbs * 60 + 2}%` })))),
       d.couplets && d.couplets.length ? el("div", { class: "card" }, el("h3", {}, "对仗（B层启发式）"),
         d.couplets.map((c) => el("div", { class: "kv" },
           `${c.couplet}：${c.verdict}｜平仄相对率 ${c.tone_opposition_rate}｜范畴对位率 ${c.category_match_rate ?? "—"}`))) : null,
       el("div", { class: "card dim" }, esc(d.note)));
   };
   input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") run(); });
-  main.replaceChildren(el("h2", {}, "进入一首诗（逐句诗境：意象/情感/平仄/典故 + 情感曲线）"),
+  main.replaceChildren(el("h2", {}, "进入一首诗（逐句：意象/情感标记/平仄/典故候选 + 情感标记密度）"),
     el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "进入")), out);
 };
 
@@ -436,6 +471,89 @@ views.gloss = async (main) => {
     el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "查字")), out);
 };
 
+views.compose = async (main) => {
+  const genre = el("select", {}, ["七绝", "五绝", "七律", "五律"].map((g) => el("option", { value: g }, g)));
+  const rhyme = el("input", { placeholder: "韵脚字（可选），如：秋", maxlength: "1", style: "min-width:160px" });
+  const mood = el("input", { placeholder: "立意/心境（可选），如：送别友人", style: "flex:1" });
+  const avoid = el("input", { placeholder: "回避意象（顿号分隔）", style: "min-width:160px" });
+  const out = el("div", {});
+  const runHelper = async () => {
+    out.replaceChildren(el("div", { class: "card" }, "备料中…"));
+    try {
+      const d = await api.post("/api/compose", {
+        genre: genre.value, rhyme_char: rhyme.value, mood: mood.value,
+        avoid_imagery: avoid.value.split(/[、,，\s]+/).filter(Boolean) });
+      show(out,
+        el("div", { class: "card dim" }, esc(d.declaration)),
+        el("div", { class: "card" },
+          el("h3", {}, `${esc(d.genre)} 标准谱（○平 ●仄 ◎常规可宽）`),
+          el("div", { class: "grid2" },
+            Object.entries(d.templates || {}).map(([q, lines]) => el("div", {},
+              el("div", { class: "kv" }, el("b", {}, q)),
+              el("div", { class: "pu" }, lines.map((l) => el("div", {}, l)))))),
+          el("div", { class: "dim" }, esc(d.template_note))),
+        d.rhyme ? el("div", { class: "card" },
+          el("h3", {}, `韵部「${esc(d.rhyme.char)}」`),
+          el("div", { class: "kv" },
+            `平水韵：${(d.rhyme.pingshui || []).join("、") || "—"}｜词林正韵：${(d.rhyme.cilin || []).join("、") || "—"}`),
+          el("div", {}, (d.rhyme.candidates || []).map((c) => el("span", { class: "tag kai" }, c))),
+          el("div", { class: "dim" }, esc(d.rhyme.note))) : null,
+        d.imagery_suggestions && d.imagery_suggestions.length ? el("div", { class: "card" },
+          el("h3", {}, "意象建议（语料档案，可回避）"),
+          d.imagery_suggestions.map((s) => el("div", { class: "hit" },
+            el("span", { class: "tag", onclick: () => { go("imagery"); setTimeout(() => runImagery(s.imagery), 60); } }, s.imagery),
+            el("span", { class: "kv" }, s.association ? `　多与「${s.association}」相系` : ""),
+            s.example && s.example.quote ? el("div", { class: "quote" }, `「${esc(s.example.quote)}」`,
+              s.example.poem_id ? el("span", { class: "pid", onclick: () => openPoem(s.example.poem_id) }, " " + s.example.poem_id) : null) : null))) : null);
+    } catch (e) { out.replaceChildren(el("div", { class: "card err" }, e.message)); }
+  };
+  const draft = el("textarea", { placeholder: "草稿逐句一行，如：\n白日依山尽\n黄河入海流\n欲穷千里目\n更上一层楼" });
+  const outc = el("div", {});
+  const runCheck = async () => {
+    outc.replaceChildren(el("div", { class: "card" }, "复核中…"));
+    try {
+      const d = await api.post("/api/check_draft", { lines: draft.value.split(/\n+/), genre: genre.value });
+      if (d.error) { outc.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
+      const t = d.tonal || {}, tm = t.template_match || {};
+      show(outc,
+        el("div", { class: "card" },
+          el("span", { class: "layer B" }, "B 计量"),
+          el("div", { class: "pu" }, (t.line_patterns || []).map((p) => el("div", {}, p))),
+          el("div", { class: "kv" },
+            tm.best_fit ? `最近标准谱：${tm.best_fit}（严格位偏差 ${tm.deviations}）` : "未匹配标准谱（非 4/8 句齐言近体）",
+            el("br"),
+            `首句入韵：${t.first_line_rhymes === true ? "是" : t.first_line_rhymes === false ? "否" : "不可判"}` +
+            `｜两读字：${t.uncertain_chars ?? 0} 处｜韵调：${esc(t.rhyme_tone || "—")}`),
+          (t.issues || []).length ? el("div", { class: "kv warn" },
+            "律则提示：" + t.issues.map((i) => typeof i === "string" ? i : (i.issue || i.type || JSON.stringify(i))).join("；")) : null,
+          (t.rhyme_feet_phonology || []).length ? el("table", {},
+            el("tr", {}, el("th", {}, "韵脚"), el("th", {}, "声调"), el("th", {}, "平水韵"), el("th", {}, "词林正韵")),
+            t.rhyme_feet_phonology.map((f) => el("tr", {},
+              el("td", { class: "kai" }, f.char), el("td", {}, (f.tones || []).join("/")),
+              el("td", {}, (f.pingshui || []).join("/")), el("td", {}, (f.cilin || []).join("/"))))) : null,
+          el("div", { class: "dim" }, esc(t.note))),
+        d.collisions && d.collisions.length ? el("div", { class: "card" },
+          el("h3", {}, "撞句提醒"),
+          d.collisions.map((c) => el("div", { class: "kv" }, `「${esc(c.line)}」重合「${esc(c.overlaps)}」　`,
+            (c.with || []).map((w) => el("span", { class: "pid", onclick: () => openPoem(w) }, w + " "))))) : null,
+        el("div", { class: "card dim" }, esc(d.note)));
+    } catch (e) { outc.replaceChildren(el("div", { class: "card err" }, e.message)); }
+  };
+  main.replaceChildren(
+    el("h2", {}, "创作实验室（今人拟作辅助，永不伪托古人）"),
+    el("div", { class: "card" },
+      el("h3", {}, "备料：标准谱 / 韵部候选 / 意象建议"),
+      el("div", { class: "row" }, genre, rhyme, mood, avoid,
+        el("button", { class: "go", onclick: runHelper }, "备料")),
+      out),
+    el("div", { class: "card" },
+      el("h3", {}, "草稿复核：平仄 / 律则 / 撞句"),
+      draft,
+      el("div", { class: "row", style: "margin-top:8px" },
+        el("button", { class: "go", onclick: runCheck }, "复核")),
+      outc));
+};
+
 views.rhyme = async (main) => {
   const input = el("input", { placeholder: "单字，如：天 / 秋 / 愁", maxlength: "2" });
   const out = el("div", {});
@@ -486,7 +604,7 @@ views.research = async (main) => {
   const dynRows = Object.entries(d.dynasty_poem_counts || {}).map(([k, v]) => {
     const w = Math.min(100, v / 60);
     return el("div", { class: "kv" }, `${k}　${v}`,
-      el("div", { style: `height:6px;width:${w}%;background:var(--accent2);border-radius:3px;margin:2px 0 6px` }));
+      el("div", { class: "bar", style: `width:${w}%;height:6px;margin:2px 0 6px` }));
   });
   main.replaceChildren(
     el("h2", {}, "研究端（确定性统计资产）"),
@@ -532,10 +650,11 @@ views.about = async (main) => {
       "OpenCC 字表（简繁归一）。\n架构参照：Shanghan-Hermes（伤寒-赫尔墨斯）。"));
 };
 
-/* ── 路由 ───────────────────────────────────────────────────────── */
+/* ── 路由（支持 #视图 深链接） ──────────────────────────────────── */
 function go(name) {
   document.querySelectorAll("#nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === name));
+  if (views[name] && location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
   const main = $("#main");
   main.replaceChildren();
   (views[name] || views.dashboard)(main).catch((e) =>
@@ -553,6 +672,11 @@ async function boot() {
   } catch (e) {
     $("#badge-backend").textContent = "未就绪";
   }
-  go("dashboard");
+  const initial = location.hash.replace("#", "");
+  go(views[initial] ? initial : "dashboard");
 }
+window.addEventListener("hashchange", () => {
+  const v = location.hash.replace("#", "");
+  if (views[v]) go(v);
+});
 boot();

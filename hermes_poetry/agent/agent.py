@@ -63,12 +63,29 @@ class PoetryAgent:
                              "删除无法回源的引用与引文。"})
             answer = self._react(messages, tool_results, registry)
             report = self.guard.check(answer, allowed_ids=self._evidence_ids(tool_results))
+        # 第二道闸门（控制器而非尾注）：事实违例 → 强制重写一轮；
+        # 仍违例 → 不发布错误正文，只返回已验证的更正信息
+        from .claims import ClaimGuard, annotate_claims
+        cguard = ClaimGuard(self.registry.engine)
+        claim_report = cguard.check(answer)
+        if claim_report.violations:
+            messages.append({"role": "assistant", "content": answer})
+            messages.append({"role": "user", "content":
+                             "论断核验发现事实错误：" +
+                             json.dumps(claim_report.violations, ensure_ascii=False) +
+                             "\n请修正后重写答案（不得保留错误归属/数字）。"})
+            answer = self._react(messages, tool_results, registry)
+            report = self.guard.check(answer, allowed_ids=self._evidence_ids(tool_results))
+            claim_report = cguard.check(answer)
+            if claim_report.violations:
+                fixes = "；".join(v["problem"] for v in claim_report.violations[:3])
+                answer = ("回答未通过论断核验，为避免传播错误信息不予发布。"
+                          f"已验证的更正：{fixes}")
+                report = self.guard.check(answer, allowed_ids=None)
+                claim_report = cguard.check(answer)
         if ig["notice"]:
             answer = ig["notice"] + "\n\n" + answer
         final = self.guard.annotate(answer, report)
-        # 第二道闸门：论断分型核验（归属/数字/过度阐释）
-        from .claims import ClaimGuard, annotate_claims
-        claim_report = ClaimGuard(self.registry.engine).check(final)
         final = annotate_claims(final, claim_report)
         return governed({
             "question": question,

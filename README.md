@@ -1,7 +1,16 @@
 # Hermes-CNPoetry（诗海赫尔墨斯）
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/psknlr/CNPoetry-Hermes/blob/main/notebooks/CNPoetry_Hermes_Colab.ipynb)
+[![Python](https://img.shields.io/badge/python-%E2%89%A53.9-12669e)](https://www.python.org/)
+[![Zero Dependency](https://img.shields.io/badge/dependencies-0-3d6b52)](#快速开始)
+[![License: MIT](https://img.shields.io/badge/license-MIT-a63a2b)](THIRD_PARTY_NOTICES.md)
+
 **中华古典诗词自主规则挖掘与 Skill 生成系统** —— 把古典诗词语料转化为一个
 可回源、可推理、可比较、可教学、可研究、可调用的规则系统与多智能体。
+
+**▶ 一键在线体验：[打开 Colab 笔记本](https://colab.research.google.com/github/psknlr/CNPoetry-Hermes/blob/main/notebooks/CNPoetry_Hermes_Colab.ipynb)** ——
+零依赖跑通全流水线（约 1–2 分钟），体验检索/诗境/格律/训诂/智能体合议/创作实验室，
+并可在 Colab 中直接打开中国风 Web 控制台。
 
 > 架构参照 [Shanghan-Hermes（伤寒-赫尔墨斯）](https://github.com/pariskang/Shanghan-Hermes)：
 > 同一套「证据优先」设计理念，从《伤寒论》条文域完整移植到古典诗词域。
@@ -103,7 +112,7 @@ python3 -m hermes_poetry evaluate
 python3 -m hermes_poetry skills
 ```
 
-## Web 控制台
+## Web 控制台（中国风 · 宣纸昼／夜读双主题）
 
 ```bash
 python3 -m hermes_poetry serve        # 打开 http://127.0.0.1:8765/
@@ -111,12 +120,30 @@ python3 -m hermes_poetry serve        # 打开 http://127.0.0.1:8765/
 # 请求体上限 256KB，整数参数钳位，异常只回 trace_id 不回内部细节
 ```
 
-纯标准库实现（`http.server` + 原生 JS 单页应用，无构建、无 CDN、离线可用，
-移动端自适应）。16 个模块：总览 · 智能体 · **多智能体合议**（规划→取证→
-意象/格律/题材/比较专家→批评→共识裁决→综合，可视化为时间线，每步附证据）·
-原文检索 · 情境荐诗 · 对比鉴赏 · 教学 · 意象档案 · 词牌定格 · 诗人档案 ·
-字义训诂 · 韵伴聚类 · 互文检测 · 研究端 · Skill 库 · 关于。
-证据优先：答案中的 `poem_id` 一律可点击，展开**作品全息抽屉**（A/B/C/D 分层色标）。
+![总览 · 宣纸昼主题](docs/assets/ui-dashboard-light.png)
+
+**设计语言**：宣纸底色 + 纸纤维肌理（内联 SVG，无外链资源）、墨/朱砂/黛青/竹青
+传统设色、印章式落款与按钮、古籍文武线版框、界栏竖排原文（自右而左展卷）、
+远山水墨剪影；「夜读」深色主题一键切换（右上角 昼/夜）。图表用色经色觉安全
+校验（明度带/彩度下限/CVD 分离/对比度四查通过）。纯标准库 + 原生 JS 单页应用，
+无构建、无 CDN、离线可用，移动端自适应，`#视图名` 哈希深链接。
+
+| 竖排展卷（作品全息抽屉） | 进入一首诗（逐句诗境） |
+|---|---|
+| ![竖排原文](docs/assets/ui-drawer-vpoem-light.png) | ![诗境](docs/assets/ui-scene-light.png) |
+
+**17 个功能视图**，按用户旅程分五卷：
+**卷一 问诗词**（智能体 · 多智能体合议——规划→取证→意象/格律/题材/比较专家→
+批评→共识裁决→综合，时间线可视化，每步附证据）· **卷二 读一首**（进入一首诗 ·
+原文检索 · 情境荐诗 · 对比鉴赏 · 字义训诂）· **卷三 学诗词**（教学 · 意象档案 ·
+词牌定格 · 诗人档案）· **卷四 创作**（创作实验室：四起式标准谱 + 平水韵候选字 +
+意象建议 + 草稿平仄/律则/撞句复核，永远标注今人拟作）· **卷五 研究端**（韵伴聚类 ·
+互文检测 · 统计资产 · Skill 库）。
+
+![创作实验室 · 夜读主题](docs/assets/ui-compose-dark.png)
+
+证据优先：答案中的 `poem_id` 一律可点击，展开**作品全息抽屉**（A/B/C/D 分层
+色标，原文按古籍版式竖排）。
 
 ## 多智能体合议
 
@@ -192,7 +219,7 @@ python3 -m hermes_poetry llm-status
 | 资产 | 规模 |
 |---|---|
 | 归一化作品 | 26,720 首（跨集去重保留全本；异文版本并存；元曲支曲救回） |
-| 初始规则（过闸门） | 48,370 条（拒绝 1,052 条，全量审计 ~29 万条） |
+| 初始规则（过闸门） | 48,252 条（拒绝 1,057 条，全量审计 ~29 万条）——权威口径以 `python3 -m hermes_poetry stats` 实时输出为准 |
 | 意象档案 | 50 个（如「月」，相反情感并存如实呈现，证据链跨朝代轮转采样） |
 | 题材/词牌曲牌/诗人档案 | 9 / 578 / 487 个（元曲曲牌已入档；「失调名」占位符剔除） |
 | 韵伴聚类 | 53 组（相邻韵脚连边归纳；平/入声零混杂，如「竹·宿」入声组、「年·天·烟」一先组） |
@@ -216,7 +243,7 @@ python3 -m hermes_poetry llm-status
 
 ```bash
 HERMES_TEST_FAST=1 python3 -m unittest discover -s tests   # 快速层：26 项 <1s
-python3 -m unittest discover -s tests                       # 全量：79 项（含语料级）
+python3 -m unittest discover -s tests                       # 全量：86 项（含语料级）
 ```
 
 `tests/test_review.py` 是「无原文，不成论断」的可执行契约：伪造证据跨度、
@@ -244,11 +271,13 @@ hermes_poetry/
 ├── agent/        ToolRegistry（能力代理）/CitationGuard/单智能体/多智能体合议
 ├── apps/         领域引擎：荐诗/对比/教学/全息/研究
 ├── eval/         检索/计量/引用落地三大评测
-├── server/       纯标准库 Web 控制台（16 模块单页应用）
+├── server/       纯标准库 Web 控制台（17 视图中国风单页应用，宣纸/夜读双主题）
 └── cli.py        23 个子命令
 ```
 
 ## 许可
 
-MIT。语料版权归各原始数据集（chinese-poetry MIT；OpenCC Apache-2.0；
-PoetryMTEB 样本按其数据集条款；gujilab CC0）。
+MIT。语料版权归各原始数据集，逐源声明见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（chinese-poetry MIT；
+OpenCC Apache-2.0；韵典网广韵整理本；PoetryMTEB 样本按其数据集条款；
+gujilab CC0）。

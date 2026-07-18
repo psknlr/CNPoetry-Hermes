@@ -72,8 +72,9 @@ def _verify(cand: Dict, poem: Poem) -> List[str]:
 
 
 def _calibrate(cand: Dict, poem: Poem) -> None:
-    """最终置信度 = 模型自评 × 证据覆盖 × 意象确定性（封顶 0.95）。
-    模型裸值不直接采信；校准依据落盘可审计。"""
+    """启发式可信分 = 模型自评 × 证据覆盖 × 意象确定性（封顶 0.95）。
+    模型裸值不直接采信；组合依据落盘可审计。注意：这不是统计意义上的
+    校准概率（无标注集对齐），只是可审计的降权启发式。"""
     model_conf = min(max(float(cand.get("confidence") or 0.5), 0.0), 1.0)
     spans = cand.get("support_spans") or []
     coverage = min(1.0, len(spans) / 2.0) if spans else 0.0
@@ -82,9 +83,10 @@ def _calibrate(cand: Dict, poem: Poem) -> None:
     final = round(min(0.95, model_conf * (0.5 + 0.5 * coverage) * identity * has_counter), 3)
     cand["confidence_raw"] = model_conf
     cand["confidence"] = final
-    cand["calibration"] = {"coverage": coverage, "identity": identity,
+    cand["score_basis"] = {"coverage": coverage, "identity": identity,
                            "counter_reading_factor": has_counter,
-                           "note": "模型自评×证据覆盖×意象确定性，封顶0.95；专家一致性/文献支持度校准见路线图"}
+                           "note": "启发式可信分（模型自评×证据覆盖×意象确定性，封顶0.95），"
+                                   "非统计校准概率；真校准（标注集对齐）见路线图"}
 
 
 def annotate_semantic(poem: Poem, client=None) -> Dict:
@@ -125,7 +127,7 @@ def annotate_semantic(poem: Poem, client=None) -> Dict:
             accepted.append(c)
     mode_notice = ("当前为离线基础模式：仅识别物象及其原文位置，"
                    "未执行句法、诗境与深层解释分析。" if degraded else
-                   "解释层候选已过逐字回源与相关性核验；置信度为校准值非模型裸值。")
+                   "解释层候选已过逐字回源与相关性核验；置信度为启发式可信分（非统计校准概率）。")
     return {"poem_id": poem.poem_id, "layer": "E" if not degraded else "A",
             "backend": client.backend, "degraded": degraded,
             "mode_notice": mode_notice,

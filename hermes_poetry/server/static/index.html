@@ -4,34 +4,45 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>诗海赫尔墨斯 · Hermes-CNPoetry</title>
+<script>
+/* 先于绘制应用主题，避免闪烁 */
+(function(){var t=localStorage.getItem("hermes_theme");
+if(t==="dark")document.documentElement.setAttribute("data-theme","dark");})();
+</script>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header id="topbar">
-  <div class="brand">诗海<span>赫尔墨斯</span></div>
+  <div class="brand">
+    <span class="seal" aria-hidden="true"><i>诗海</i></span>
+    <span class="brand-name">诗海赫尔墨斯<i class="brand-sub">Hermes-CNPoetry · 无原文，不成论断</i></span>
+  </div>
   <div class="badges">
     <span id="badge-backend" class="badge">后端…</span>
     <span id="badge-poems" class="badge">语料…</span>
+    <button id="theme-toggle" class="badge theme-btn" title="切换昼夜">夜</button>
   </div>
 </header>
 <div id="layout">
   <nav id="nav">
     <button data-view="dashboard" class="active">总览</button>
-    <div class="navgroup">问诗词</div>
+    <div class="navgroup"><em>卷一</em>问诗词</div>
     <button data-view="agent">智能体</button>
     <button data-view="council">多智能体合议</button>
-    <div class="navgroup">读一首</div>
+    <div class="navgroup"><em>卷二</em>读一首</div>
     <button data-view="scene">进入一首诗</button>
     <button data-view="search">原文检索</button>
     <button data-view="match">情境荐诗</button>
     <button data-view="differential">对比鉴赏</button>
     <button data-view="gloss">字义训诂</button>
-    <div class="navgroup">学诗词</div>
+    <div class="navgroup"><em>卷三</em>学诗词</div>
     <button data-view="teach">教学</button>
     <button data-view="imagery">意象档案</button>
     <button data-view="cipai">词牌定格</button>
     <button data-view="author">诗人档案</button>
-    <div class="navgroup">研究端</div>
+    <div class="navgroup"><em>卷四</em>创作</div>
+    <button data-view="compose">创作实验室</button>
+    <div class="navgroup"><em>卷五</em>研究端</div>
     <button data-view="rhyme">韵伴聚类</button>
     <button data-view="intertext">互文检测</button>
     <button data-view="research">统计资产</button>
@@ -41,10 +52,10 @@
   <main id="main"></main>
 </div>
 <aside id="drawer" class="hidden">
-  <div id="drawer-head"><button id="drawer-close">✕ 关闭</button></div>
+  <div id="drawer-head"><button id="drawer-close">✕ 合上</button></div>
   <div id="drawer-body"></div>
 </aside>
-<footer id="foot">Hermes-CNPoetry · 无原文，不成论断 · 证据层级 A原文/B计量/C旁证/D外部分析/E模型解释</footer>
+<footer id="foot">诗海赫尔墨斯 · 无原文，不成论断 · 证据层级 A原文／B计量／C旁证／D外部分析／E模型解释</footer>
 <script src="/app.js"></script>
 </body>
 </html>

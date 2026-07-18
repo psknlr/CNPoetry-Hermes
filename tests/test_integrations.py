@@ -38,10 +38,18 @@ class TestGloss(unittest.TestCase):
         sw = r["glosses"][0]["shuowen"]
         self.assertIsNotNone(sw)
 
-    def test_gloss_by_poem(self):
+    def test_gloss_by_poem_ambiguous_card(self):
+        # 《静夜思》语料中有两个异文版本（牀前看月光/牀前明月光）→ 严格歧义卡
         r = self.engine.gloss_query(poem_ref="《静夜思》")
+        self.assertEqual(r["error"]["code"], "POEM_AMBIGUOUS")
+        refs = [c["ref"] for c in r["error"]["candidates"]]
+        self.assertTrue(all("#" in ref for ref in refs))  # 候选卡给出可直接复制的定解语法
+
+    def test_gloss_by_poem_hinted(self):
+        # #首句 提示定解（简体输入折叠命中繁体首句）
+        r = self.engine.gloss_query(poem_ref="《静夜思》#床前明月光")
         self.assertTrue(r["glosses"])
-        self.assertTrue(r["poem_id"].startswith("CNP_"))
+        self.assertEqual(r["poem_id"], "CNP_QIANJIA_00023")
 
     def test_erya_groups(self):
         self.assertGreater(len(self.engine.erya), 250)
@@ -104,7 +112,7 @@ class TestExternalBinding(unittest.TestCase):
     def test_dlayer_bindings_expanded(self):
         import json
         rules = [json.loads(l) for l in
-                 (config.RULES_INITIAL_DIR / "initial_rules.jsonl").open(encoding="utf-8")]
+                 (config.RULES_INITIAL_DIR / "initial_rules.jsonl").read_text(encoding="utf-8").splitlines()]
         ext = [r for r in rules if r["rule_type"] == "external_analysis_rule"]
         self.assertGreater(len(ext), 1000)
         # 每条 D 层规则都通过了双向回源（进入 accepted 即证据核验通过）
