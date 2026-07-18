@@ -93,6 +93,56 @@ class Phonology:
     def line_pattern(self, line: str) -> List[str]:
         return [self.ping_ze(c) for c in cjk_chars(strip_brackets(line))]
 
+    # ── 近体标准谱匹配（四起式）───────────────────────────────────
+    # 基础句式（王力《诗词格律》通行口径）：
+    # 五言 A仄仄平平仄 B平平仄仄平 C平平平仄仄 D仄仄仄平平；七言前加相反二字
+    _BASE5 = {"A": "仄仄平平仄", "B": "平平仄仄平", "C": "平平平仄仄", "D": "仄仄仄平平"}
+    _QISHI = {  # 起式 → 绝句四句的句式序列（律诗 = 重复两遍）
+        "仄起不入韵": "ABCD", "仄起入韵": "DBCD",
+        "平起不入韵": "CDAB", "平起入韵": "BDAB",
+    }
+
+    @classmethod
+    def _template_lines(cls, qishi: str, char_n: int, n_lines: int) -> List[str]:
+        seq = cls._QISHI[qishi] * (2 if n_lines == 8 else 1)
+        out = []
+        for key in seq:
+            base = cls._BASE5[key]
+            if char_n == 7:
+                head = {"平": "仄仄", "仄": "平平"}[base[0]]
+                base = head + base
+            out.append(base)
+        return out
+
+    def match_template(self, patterns: List[List[str]]) -> Dict:
+        """与四种起式标准谱比对：严格位（二四六与句脚）计违例，
+        宽位（一三五）不计；两读/无考按通配处理。拗救不判（诚实边界）。"""
+        n = len(patterns)
+        if n not in (4, 8) or not patterns or len(set(map(len, patterns))) != 1 \
+                or len(patterns[0]) not in (5, 7):
+            return {}
+        char_n = len(patterns[0])
+        strict = [1, 3] + ([5] if char_n == 7 else []) + [char_n - 1]
+        results = []
+        for qishi in self._QISHI:
+            tmpl = self._template_lines(qishi, char_n, n)
+            dev = []
+            for i, (p, t) in enumerate(zip(patterns, tmpl)):
+                for j in strict:
+                    if p[j] in ("平", "仄") and p[j] != t[j]:
+                        dev.append({"line": i + 1, "pos": j + 1,
+                                    "expected": t[j], "got": p[j]})
+            results.append({"qishi": qishi, "deviations": len(dev),
+                            "detail": dev[:6]})
+        results.sort(key=lambda r: r["deviations"])
+        best = results[0]
+        return {"best_fit": best["qishi"], "deviations": best["deviations"],
+                "deviation_detail": best["detail"],
+                "all_fits": [{"qishi": r["qishi"], "deviations": r["deviations"]}
+                             for r in results],
+                "note": "标准谱四起式比对（严格位=二四六与句脚，宽位一三五不计）；"
+                        "偏差≠不合律：拗救与变格未判，仅作初筛。"}
+
     # ── 律则检测（近体近似口径，多音不确定如实标注）───────────────
     def analyze_poem(self, lines: List[str], rhyme_feet: List[str]) -> Dict:
         patterns = [self.line_pattern(ln) for ln in lines]
@@ -147,16 +197,30 @@ class Phonology:
             tones = {f["tones"][0] for f in det}
             rhyme_tone = ("平韵" if tones == {"平"} else
                           "仄韵" if "平" not in tones else "平仄混押（或换韵）")
+        # 韵脚一致性反推消歧：确定韵脚同声调时，两读韵脚按押韵约束取该调
+        # （决策附依据并标 requires_review，绝不静默裁决）
+        if det and len({f["tones"][0] for f in det}) == 1:
+            target = det[0]["tones"][0]
+            for f in feet_info:
+                if len(f["tones"]) > 1 and target in f["tones"]:
+                    f["decision"] = target
+                    f["basis"] = ["同诗其余韵脚均为" + target + "声（押韵一致性反推）"]
+                    f["requires_review"] = True
         return {
             "layer": "B",
+            "phonology_system": "Guangyun-derived",
+            "target_period": "Middle Chinese approximation",
+            "historical_fit": "approximate",
             "source": "《广韵》（韵典网整理本）",
             "line_patterns": ["".join(p) for p in patterns],
             "uncertain_chars": uncertain,
             "issues": issues,
+            "template_match": self.match_template(patterns),
             "rhyme_feet_phonology": feet_info,
             "rhyme_tone": rhyme_tone,
-            "note": "平仄依《广韵》韵目定调；多音字标「两读」不参与违例判定；"
-                    "拗救与首句入韵变格不判（诚实边界）。近体律则仅对 4/8 句齐言诗检查。",
+            "note": "平仄依《广韵》推导（成书1008年，为唐宋作诗音系的近似而非实录）；"
+                    "多音字标「两读」不参与违例判定；拗救与变格不判（诚实边界）。"
+                    "近体律则仅对 4/8 句齐言诗检查，失对/失粘为初筛非定谳。",
         }
 
     # ── 韵伴聚类交叉验证 ─────────────────────────────────────────

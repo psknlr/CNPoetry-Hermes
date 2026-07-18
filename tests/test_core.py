@@ -95,3 +95,34 @@ class TestBM25(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPhonologyTables(unittest.TestCase):
+    """纯表单元测试：不加载语料（广韵字表加载为惰性，仅查映射表）。"""
+
+    def test_pingshui_covers_all_guangyun(self):
+        from hermes_poetry.extract.phonology import GY_TO_PINGSHUI, _YUN_TONE
+        missing = [y for y in _YUN_TONE if y not in GY_TO_PINGSHUI]
+        self.assertEqual(missing, [])
+
+    def test_cilin_covers_all_pingshui(self):
+        from hermes_poetry.extract.phonology import _PINGSHUI_MERGE, PS_TO_CILIN
+        missing = [p for p in _PINGSHUI_MERGE if p not in PS_TO_CILIN]
+        self.assertEqual(missing, [])
+
+    def test_template_four_qishi(self):
+        from hermes_poetry.extract.phonology import Phonology
+        for qishi in Phonology._QISHI:
+            t = Phonology._template_lines(qishi, 7, 8)
+            self.assertEqual(len(t), 8)
+            self.assertTrue(all(len(x) == 7 for x in t))
+
+
+class TestAllusionSeeds(unittest.TestCase):
+    def test_candidate_status_and_ambiguity(self):
+        from hermes_poetry.induce.allusions import detect_allusions, load_seeds
+        self.assertGreater(len(load_seeds()), 20)
+        hits = detect_allusions("不破楼兰终不还")
+        self.assertEqual(hits[0]["status"], "candidate")
+        qn = detect_allusions("青鸟殷勤为探看")
+        self.assertTrue(qn[0]["ambiguity_note"])

@@ -1,89 +1,75 @@
-"""典故种子图谱（第二阶段 MVP）：精选典故 → 出处 → 语料用例。
+"""典故种子图谱（第二阶段 MVP）：候选发现 → 语境信号 →（人工/模型）确认。
 
-诚实口径：种子表为编辑精选（curated_seed，非穷举）；出处标注典籍篇名，
-出处原文回源接入 gujilab 十三经语料（已入库者）与后续 classics 层；
-检测=表面形式逐字命中（T5 语义层面典故留待知识图谱扩展）。
+铁律：**表面命中 ≠ 用典确认**。检测输出一律为 status=candidate，附
+语境信号（题材相符/伴随动词/歧义提示）供下游裁决；高歧义种子
+（青鸟/采薇/王孙等）带 ambiguity_note。种子数据外置于
+data/raw/allusions/allusion_seeds.jsonl（版本化、含审核状态与许可，
+领域专家可不改代码维护）。
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+import json
+from functools import lru_cache
+from typing import Dict, List
 
+from .. import config
 from ..textutil import t2s
 
-# 典故 → {surfaces, source(出处), source_text(典源梗概), implies(常用义)}
-ALLUSION_SEEDS: Dict[str, Dict] = {
-    "折柳": {"surfaces": ["折柳", "折杨柳"], "source": "汉乐府《折杨柳》/灞桥送别俗",
-             "implies": "送别惜别"},
-    "阳关": {"surfaces": ["阳关"], "source": "王维《送元二使安西》后成送别曲《阳关三叠》",
-             "implies": "送别"},
-    "楼兰": {"surfaces": ["楼兰", "斩楼兰"], "source": "《汉书·傅介子传》斩楼兰王",
-             "implies": "破敌立功"},
-    "燕然": {"surfaces": ["燕然", "勒燕然"], "source": "《后汉书·窦宪传》燕然勒石",
-             "implies": "边功未成/建功"},
-    "庄周梦蝶": {"surfaces": ["庄生晓梦", "梦蝶", "蝴蝶梦"], "source": "《庄子·齐物论》",
-                 "implies": "人生如梦/物我两忘"},
-    "望帝杜鹃": {"surfaces": ["望帝", "杜鹃啼血", "啼鹃"], "source": "《华阳国志》望帝化鹃",
-                 "implies": "冤魂哀思"},
-    "青鸟": {"surfaces": ["青鸟"], "source": "《山海经》西王母信使",
-             "implies": "音信/信使"},
-    "蓬山": {"surfaces": ["蓬山", "蓬莱"], "source": "《山海经》海上仙山",
-             "implies": "可望难即之地"},
-    "牛女": {"surfaces": ["牵牛织女", "鹊桥", "银汉迢迢"], "source": "《古诗十九首》/七夕传说",
-             "implies": "隔绝相思"},
-    "嫦娥": {"surfaces": ["嫦娥", "姮娥"], "source": "《淮南子》奔月",
-             "implies": "孤寂悔恨"},
-    "王孙": {"surfaces": ["王孙归", "王孙游"], "source": "《楚辞·招隐士》王孙游兮不归",
-             "implies": "游子不归"},
-    "采薇": {"surfaces": ["采薇"], "source": "《诗经·小雅·采薇》/伯夷叔齐首阳采薇",
-             "implies": "戍役之苦/隐逸守节"},
-    "东篱": {"surfaces": ["东篱"], "source": "陶渊明《饮酒》采菊东篱下",
-             "implies": "隐逸闲适"},
-    "五柳": {"surfaces": ["五柳"], "source": "陶渊明《五柳先生传》",
-             "implies": "隐士自况"},
-    "桃源": {"surfaces": ["桃源", "武陵人", "桃花源"], "source": "陶渊明《桃花源记》",
-             "implies": "避世理想乡"},
-    "知音": {"surfaces": ["知音", "伯牙", "钟期"], "source": "《吕氏春秋》伯牙鼓琴钟子期",
-             "implies": "知己难遇"},
-    "王谢": {"surfaces": ["王谢"], "source": "《世说新语》东晋王谢门第",
-             "implies": "盛衰兴亡"},
-    "后庭花": {"surfaces": ["后庭花"], "source": "陈后主《玉树后庭花》",
-               "implies": "亡国之音"},
-    "廉颇": {"surfaces": ["廉颇"], "source": "《史记·廉颇蔺相如列传》",
-             "implies": "老将壮心"},
-    "封侯": {"surfaces": ["觅封侯", "万户侯"], "source": "《后汉书·班超传》投笔觅封侯",
-             "implies": "功名之志"},
-    "精卫": {"surfaces": ["精卫"], "source": "《山海经》精卫填海",
-             "implies": "抱憾不屈"},
-    "湘妃": {"surfaces": ["湘妃", "斑竹", "湘泪"], "source": "《博物志》舜妃泪染斑竹",
-             "implies": "悲悼之泪"},
-    "沧海桑田": {"surfaces": ["沧海桑田", "桑田碧海"], "source": "《神仙传》麻姑语",
-                 "implies": "世事巨变"},
-    "长门": {"surfaces": ["长门"], "source": "司马相如《长门赋》陈皇后失宠",
-             "implies": "失宠幽怨"},
-    "金屋": {"surfaces": ["金屋"], "source": "《汉武故事》金屋藏娇",
-             "implies": "宠爱"},
-    "乌衣巷": {"surfaces": ["乌衣巷"], "source": "金陵王谢故居",
-               "implies": "繁华成空"},
-    "闻笛": {"surfaces": ["山阳笛", "闻笛赋"], "source": "向秀《思旧赋》闻邻笛悼嵇康",
-             "implies": "悼亡怀旧"},
-    "烂柯": {"surfaces": ["烂柯"], "source": "《述异记》王质观棋斧柯烂",
-             "implies": "岁月恍隔"},
+# 典故功能的语境信号词（出现于同句附近 → 用典概率提升）
+_CONTEXT_HINTS = {
+    "送别": ["送", "别", "赠", "辞"], "破敌立功": ["破", "斩", "取", "封"],
+    "边功未成/建功": ["未", "勒", "归", "计"], "隐逸闲适": ["归", "隐", "菊", "酒"],
+    "知己难遇": ["少", "难", "绝", "断"], "盛衰兴亡": ["旧", "空", "斜", "燕"],
 }
 
-_SURFACE_INDEX: List = sorted(
-    ((t2s(s), name) for name, spec in ALLUSION_SEEDS.items() for s in spec["surfaces"]),
-    key=lambda kv: -len(kv[0]))
+
+@lru_cache(maxsize=1)
+def load_seeds() -> List[Dict]:
+    path = config.RAW_DIR / "allusions" / "allusion_seeds.jsonl"
+    seeds: List[Dict] = []
+    if not path.exists():
+        return seeds
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("name") and r.get("surfaces"):
+                seeds.append(r)
+    return seeds
+
+
+@lru_cache(maxsize=1)
+def _surface_index():
+    return sorted(((t2s(s), seed["name"], i)
+                   for i, seed in enumerate(load_seeds()) for s in seed["surfaces"]),
+                  key=lambda kv: -len(kv[0]))
 
 
 def detect_allusions(text: str) -> List[Dict]:
     folded = t2s(text)
+    seeds = load_seeds()
     hits, seen = [], set()
-    for surface, name in _SURFACE_INDEX:
-        if surface in folded and name not in seen:
-            seen.add(name)
-            spec = ALLUSION_SEEDS[name]
-            hits.append({"allusion": name, "surface": surface,
-                         "source": spec["source"], "implies": spec["implies"],
-                         "source_level": "curated_seed",
-                         "note": "编辑精选种子（非穷举）；表面命中，典故语义层留待图谱扩展"})
+    for surface, name, idx in _surface_index():
+        pos = folded.find(surface)
+        if pos < 0 or name in seen:
+            continue
+        seen.add(name)
+        seed = seeds[idx]
+        # 语境信号：典故常用义的提示动词是否出现在附近（±8字）
+        window = folded[max(0, pos - 8): pos + len(surface) + 8]
+        hint_words = _CONTEXT_HINTS.get(seed.get("implies", ""), [])
+        signals = [w for w in hint_words if w in window]
+        hits.append({
+            "allusion": name, "surface": surface,
+            "source": seed.get("source", ""), "implies": seed.get("implies", ""),
+            "status": "candidate",
+            "context_signals": signals,
+            "ambiguity_note": seed.get("ambiguity_note", ""),
+            "seed_id": seed.get("id", ""),
+            "source_level": "curated_seed",
+            "note": "表面命中≠用典确认：本条为候选，须结合语境/注释/年代裁决；"
+                    "「典故如何被改造」的功能判断需接入解释层。",
+        })
     return hits

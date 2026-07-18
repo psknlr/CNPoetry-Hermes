@@ -87,7 +87,25 @@ class Engine:
 
     def resolve_candidates(self, title: str) -> List[Poem]:
         """同题候选（消歧卡片用）。"""
-        return list(self.rag._title_index.get(t2s(title.strip("《》〈〉")), []))
+        return self.rag.find_by_title(title)
+
+    def resolve(self, ref: str) -> Dict:
+        """统一消歧结果：{status: unique|ambiguous|not_found, candidates, selected}。
+
+        事实核验类调用必须走本接口——同题异作时绝不按默认排序取首。
+        """
+        p = self.resolve_poem(ref)
+        bare = (ref or "").strip()
+        if "@" in bare or bare.startswith("CNP_"):
+            return ({"status": "unique", "selected": p, "candidates": [p]} if p
+                    else {"status": "not_found", "selected": None, "candidates": []})
+        cands = self.resolve_candidates(bare)
+        authors = {t2s(c.author) for c in cands}
+        if len(cands) > 1 and len(authors) > 1:
+            return {"status": "ambiguous", "selected": None, "candidates": cands[:8]}
+        if p is None:
+            return {"status": "not_found", "selected": None, "candidates": []}
+        return {"status": "unique", "selected": p, "candidates": cands or [p]}
 
     def resolve_poem(self, ref: str) -> Optional[Poem]:
         """支持消歧语法：《题名》@作者（如 《春晓》@孟浩然）。"""
@@ -115,11 +133,9 @@ class Engine:
         # 前缀匹配优先；子串包含仅限 ≥3 字查询（短语/人名误解析防线）
         title_s = t2s(title)
         if len(title_s) >= 2:
-            prefix_matches = [ps[0] for ts, ps in self.rag._title_index.items()
-                              if ts.startswith(title_s)]
+            prefix_matches = self.rag.titles_containing(title_s, prefix_only=True)
             if not prefix_matches and len(title_s) >= 3:
-                prefix_matches = [ps[0] for ts, ps in self.rag._title_index.items()
-                                  if title_s in ts]
+                prefix_matches = self.rag.titles_containing(title_s)
             if prefix_matches:
                 curated = [p for p in prefix_matches
                            if p.source in ("TANG300", "SONGCI300", "QIANJIA") or p.also_in]

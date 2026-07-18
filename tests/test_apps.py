@@ -11,9 +11,8 @@ from hermes_poetry import config
 
 
 def _ensure():
-    if not (config.RULES_INITIAL_DIR / "initial_rules.jsonl").exists():
-        from hermes_poetry.orchestrator import run_pipeline
-        run_pipeline(verbose=False)
+    from tests._common import require_assets
+    require_assets()
 
 
 class TestEngine(unittest.TestCase):
