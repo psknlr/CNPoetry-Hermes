@@ -18,6 +18,14 @@ function el(tag, attrs, ...children) {
   return node;
 }
 const esc = (s) => String(s == null ? "" : s);
+const errText = (e) => {
+  if (e == null) return "";
+  if (typeof e === "string") return e;
+  let msg = e.message || e.code || JSON.stringify(e);
+  if (e.candidates && e.candidates.length)
+    msg += "　候选：" + e.candidates.map((c) => c.ref || c.author).join("、");
+  return msg;
+};
 
 function authHeaders() {
   const t = localStorage.getItem(TOKEN_KEY);
@@ -61,7 +69,7 @@ async function openPoem(ref) {
   body.textContent = "载入中…";
   try {
     const d = await api.post("/api/poem", { ref });
-    if (d.error) { body.textContent = d.error; return; }
+    if (d.error) { body.textContent = errText(d.error); return; }
     const p = d.poem;
     body.replaceChildren(
       el("h2", {}, `《${esc(p.title)}》`),
@@ -242,7 +250,7 @@ views.differential = async (main) => {
   const run = async () => {
     out.replaceChildren(el("div", { class: "card" }, "对比中…"));
     const d = await api.post("/api/differential", { refs: [a.value, b.value].filter(Boolean) });
-    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
     out.replaceChildren(
       el("div", { class: "card" },
         (d.poems || []).map((p) => el("div", { class: "hit" },
@@ -263,7 +271,7 @@ views.teach = async (main) => {
   const run = async (topic) => {
     out.replaceChildren(el("div", { class: "card" }, "备课中…"));
     const d = await api.post("/api/teach", { topic: topic || input.value });
-    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
     const les = d.lesson;
     out.replaceChildren(el("div", { class: "card" },
       el("h3", {}, `【${esc(les.type)}】${esc(les.topic)}`),
@@ -293,7 +301,7 @@ views.imagery = async (main) => {
     out.replaceChildren(el("div", { class: "card" }, "查询中…"));
     const d = await api.post("/api/imagery", { imagery: name || input.value });
     if (d.error) {
-      out.replaceChildren(el("div", { class: "card" }, el("div", { class: "err" }, d.error),
+      out.replaceChildren(el("div", { class: "card" }, el("div", { class: "err" }, errText(d.error)),
         (d.available || []).map((i) => el("span", { class: "tag", onclick: () => { input.value = i; run(i); } }, i))));
       return;
     }
@@ -322,7 +330,7 @@ views.cipai = async (main) => {
   const run = async () => {
     out.replaceChildren(el("div", { class: "card" }, "查询中…"));
     const d = await api.post("/api/cipai", { cipai: input.value });
-    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
     const r = d.cipai_profile;
     out.replaceChildren(el("div", { class: "card" },
       el("h3", {}, `词牌「${esc(r.cipai)}」（语料 ${r.n_poems} 首）`),
@@ -346,7 +354,7 @@ views.author = async (main) => {
   const run = async () => {
     out.replaceChildren(el("div", { class: "card" }, "查询中…"));
     const d = await api.post("/api/author", { author: input.value });
-    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
     const r = d.author_profile;
     out.replaceChildren(el("div", { class: "card" },
       el("h3", {}, `${esc(r.author)}（${esc(r.dynasty)}）· 语料 ${r.n_poems} 首`),
@@ -375,7 +383,7 @@ views.gloss = async (main) => {
     const v = input.value.trim();
     const body = v.startsWith("《") ? { poem_ref: v } : { chars: v };
     const d = await api.post("/api/gloss", body);
-    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
     out.replaceChildren(el("div", { class: "card" },
       el("div", { class: "kv" }, el("span", { class: "layer C" }, "C 训诂"), el("i", {}, esc(d.note))),
       el("table", {}, el("tr", {}, el("th", {}, "字"), el("th", {}, "说文解字"), el("th", {}, "尔雅")),
@@ -422,7 +430,7 @@ views.intertext = async (main) => {
     const v = input.value.trim();
     const body = v.startsWith("《") ? { poem_ref: v } : { text: v };
     const d = await api.post("/api/intertext", body);
-    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, d.error)); return; }
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
     const pairs = (d.pairs || []).map((r) => el("div", { class: "hit" },
       el("div", { class: "t" }, `${r.mode}　`, el("span", { class: "quote" }, `「${esc(r.shared_span)}」`)),
       el("div", { class: "meta" },
@@ -440,7 +448,7 @@ views.intertext = async (main) => {
 views.research = async (main) => {
   main.replaceChildren(el("h2", {}, "研究端"), el("div", { class: "card" }, "载入中…"));
   const d = await api.post("/api/research", {});
-  if (d.error) { main.replaceChildren(el("h2", {}, "研究端"), el("div", { class: "card err" }, d.error)); return; }
+  if (d.error) { main.replaceChildren(el("h2", {}, "研究端"), el("div", { class: "card err" }, errText(d.error))); return; }
   const dynRows = Object.entries(d.dynasty_poem_counts || {}).map(([k, v]) => {
     const w = Math.min(100, v / 60);
     return el("div", { class: "kv" }, `${k}　${v}`,

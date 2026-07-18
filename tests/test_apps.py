@@ -1,4 +1,10 @@
 """领域引擎与检索测试（依赖已生成的规则库）。"""
+import os as _os
+import unittest as _ut
+if _os.environ.get("HERMES_TEST_FAST") == "1":
+    raise _ut.SkipTest("fast mode：跳过需装载语料/规则库的测试（HERMES_TEST_FAST=1）")
+
+
 import unittest
 
 from hermes_poetry import config

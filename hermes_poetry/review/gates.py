@@ -195,8 +195,10 @@ def criticize(rule: InitialRule, store: PoemStore) -> Tuple[str, List[str]]:
             flags.append(f"critic:posthoc_term_in_body:{term}")
             hard_fail = True
     # 2) 情感标记处于否定语境却计为正向（硬失败）。
-    #    统一在去标点/空白的内容层扫描，防止带杂质的 marker 绕过检查。
+    #    统一在去标点/空白的内容层扫描，否定窗口与抽取层同一口径
+    #    （「不是愁」「未必愁」跨桥接字亦被管辖）。
     if rule.rule_type == "imagery_emotion_rule":
+        from ..extract.annotate import negation_scope
         from ..textutil import content_only
         marker = rule.then_conclusions.get("emotion_marker", "")
         span = content_only(t2s(rule.evidence_span))
@@ -204,7 +206,7 @@ def criticize(rule: InitialRule, store: PoemStore) -> Tuple[str, List[str]]:
             m_folded = content_only(t2s(marker))
             idx = span.find(m_folded) if m_folded else -1
             while idx >= 0:
-                if idx > 0 and span[idx - 1] in NEGATION_PREFIX:
+                if negation_scope(span, idx):
                     flags.append(f"critic:negated_emotion_as_positive:{marker}")
                     hard_fail = True
                     break

@@ -21,6 +21,8 @@ body { background: var(--bg); color: var(--fg); font-family: "Noto Serif SC", "S
 #nav button:hover { color: var(--fg); }
 #nav button.active { color: var(--accent); border-right: 2px solid var(--accent);
                      background: var(--panel2); }
+.navgroup { padding: 10px 16px 3px; color: var(--accent2); font-size: 11px;
+            letter-spacing: 2px; opacity: .8; }
 #main { flex: 1; padding: 18px 22px; overflow-y: auto; }
 #foot { padding: 8px 18px; border-top: 1px solid var(--line); color: var(--dim);
         font-size: 12px; background: var(--panel); }

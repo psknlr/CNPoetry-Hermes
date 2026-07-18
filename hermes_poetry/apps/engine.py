@@ -78,7 +78,19 @@ class Engine:
             return ""
 
     # ── 基础 ────────────────────────────────────────────────────
+    @staticmethod
+    def err(code: str, message: str, recoverable: bool = True, **extra) -> Dict:
+        """结构化错误（供前端/智能体/调用方恢复），保留 message 便于展示。"""
+        e = {"code": code, "message": message, "recoverable": recoverable}
+        e.update(extra)
+        return {"error": e}
+
+    def resolve_candidates(self, title: str) -> List[Poem]:
+        """同题候选（消歧卡片用）。"""
+        return list(self.rag._title_index.get(t2s(title.strip("《》〈〉")), []))
+
     def resolve_poem(self, ref: str) -> Optional[Poem]:
+        """支持消歧语法：《题名》@作者（如 《春晓》@孟浩然）。"""
         ref = (ref or "").strip()
         if ref in self.by_id:
             return self.by_id[ref]
@@ -86,7 +98,16 @@ class Engine:
         m = re.search(r"CNP_[A-Z0-9]+_\d{5}", ref)
         if m and m.group(0) in self.by_id:
             return self.by_id[m.group(0)]
+        author_hint = ""
+        if "@" in ref:
+            ref, _, author_hint = ref.partition("@")
+            ref = ref.strip()
+            author_hint = t2s(author_hint.strip())
         title = ref.strip("《》〈〉")
+        if author_hint:
+            cands = [p for p in self.resolve_candidates(title) if t2s(p.author) == author_hint]
+            if cands:
+                return cands[0]
         hits = self.rag.search(f"《{title}》", top_k=1)
         if hits and hits[0]["match_source"] == "direct_title":
             return self.by_id[hits[0]["poem_id"]]
@@ -291,9 +312,20 @@ class Engine:
 
     # ── 作品全息 ─────────────────────────────────────────────────
     def explain_poem(self, ref: str) -> Dict:
+        # 同题多作且未指定作者 → 返回消歧候选卡（不猜）
+        bare = (ref or "").strip()
+        if "@" not in bare and not bare.startswith("CNP_"):
+            cands = self.resolve_candidates(bare)
+            distinct_authors = {t2s(c.author) for c in cands}
+            if len(cands) > 1 and len(distinct_authors) > 1:
+                return self.err(
+                    "POEM_AMBIGUOUS", f"存在多首同题作品《{bare.strip('《》〈〉')}》，请以 @作者 指定",
+                    candidates=[{"poem_id": c.poem_id, "author": c.author, "dynasty": c.dynasty,
+                                 "first_line": c.lines[0] if c.lines else "",
+                                 "ref": f"《{c.title}》@{c.author}"} for c in cands[:6]])
         p = self.resolve_poem(ref)
         if p is None:
-            return {"error": f"无法解析作品「{ref}」（可用 poem_id 或《题名》）。"}
+            return self.err("POEM_NOT_FOUND", f"无法解析作品「{ref}」（可用 poem_id 或《题名》@作者）")
         related_intertext = [r for r in self.intertext_rules
                              if p.poem_id in (r["source_poem_id"], r["target_poem_id"])][:6]
         ext = self._ext_by_poem.get(p.poem_id)
