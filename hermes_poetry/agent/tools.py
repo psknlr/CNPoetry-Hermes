@@ -135,9 +135,9 @@ class ToolRegistry:
     def _allusion(self, text="", poem_ref="") -> Dict:
         from ..induce.allusions import detect_allusions
         if poem_ref:
-            p = self.engine.resolve_poem(poem_ref)
-            if p is None:
-                return self.engine.err("POEM_NOT_FOUND", f"无法解析「{poem_ref}」")
+            p, err = self.engine.require_unique(poem_ref)
+            if err:
+                return err
             return {"poem_id": p.poem_id, "allusions": detect_allusions(p.text)}
         return {"allusions": detect_allusions(text)} if text else \
             self.engine.err("MISSING_ARG", "需提供 text 或 poem_ref")
@@ -161,9 +161,9 @@ class ToolRegistry:
         return self.engine.differential(refs)
 
     def _metrics(self, poem_ref="") -> Dict:
-        p = self.engine.resolve_poem(poem_ref)
-        if p is None:
-            return {"error": f"无法解析作品「{poem_ref}」。"}
+        p, err = self.engine.require_unique(poem_ref)
+        if err:
+            return err
         from ..extract.metrics import describe
         return {"metrics": describe(p)}
 
@@ -183,9 +183,9 @@ class ToolRegistry:
         return {"error": f"无诗人档案「{author}」（语料内作品≥5首才建档）。"}
 
     def _external(self, poem_ref="") -> Dict:
-        p = self.engine.resolve_poem(poem_ref)
-        if p is None:
-            return {"error": f"无法解析作品「{poem_ref}」。"}
+        p, err = self.engine.require_unique(poem_ref)
+        if err:
+            return err
         ext = self.engine._ext_by_poem.get(p.poem_id)
         if not ext:
             return {"poem_id": p.poem_id, "analysis": None,

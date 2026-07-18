@@ -66,12 +66,24 @@ def _match_terms(folded: str, surface_table, taken: List[bool]):
     return hits
 
 
+# 词义消歧（首批：「月」）：单字「月」前接数字/历法/时段词时为月份义，
+# 不作月亮意象（实测语料月份误标约 11.6%，复审 P0 项）。
+# 「日月」保留为天体并举意象；机制可按意象扩展（柳=地名、山=山东等）。
+_MONTH_PRE = set("一二两三四五六七八九十正腊闰几数岁年经累")
+
+
+def _is_month_sense(folded: str, idx: int, surface: str) -> bool:
+    return surface == "月" and idx > 0 and folded[idx - 1] in _MONTH_PRE
+
+
 def annotate_line(line: str, line_idx: int) -> LineHits:
     folded = t2s(line)
     out = LineHits(line_idx=line_idx, line=line)
     taken = [False] * len(folded)
-    # 意象先占位（多为名词性，优先级高）
+    # 意象先占位（多为名词性，优先级高）；词义排除语境不计
     for canon, surface, idx in _match_terms(folded, IMAGERY_SURFACE, taken):
+        if canon == "月" and _is_month_sense(folded, idx, surface):
+            continue
         out.imagery.append((canon, surface))
     # 情感标记：独立掩码——意象与情感是两个正交维度，共享掩码会让
     # 单字意象「云」吃掉更长的情感标记「凌云」（违背最长优先）

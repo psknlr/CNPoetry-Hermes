@@ -59,7 +59,9 @@ def detect_allusions(text: str) -> List[Dict]:
         seed = seeds[idx]
         # 语境信号：典故常用义的提示动词是否出现在附近（±8字）
         window = folded[max(0, pos - 8): pos + len(surface) + 8]
-        hint_words = _CONTEXT_HINTS.get(seed.get("implies", ""), [])
+        implies = seed.get("implies", "")
+        hint_words = [w for key, ws in _CONTEXT_HINTS.items()
+                      if key in implies for w in ws]
         signals = [w for w in hint_words if w in window]
         hits.append({
             "allusion": name, "surface": surface,

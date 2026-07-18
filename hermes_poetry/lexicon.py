@@ -166,6 +166,9 @@ MOOD_HINTS: Dict[str, Dict[str, List[str]]] = {
     "隐居": {"themes": ["山水田园"], "imagery": ["松", "竹", "渔樵"], "emotions": ["喜悦闲适"]},
     "爱情": {"themes": ["爱情闺怨"], "imagery": ["红豆", "燕"], "emotions": ["思念怀想"]},
     "怀旧": {"themes": ["咏史怀古"], "imagery": ["夕阳", "燕"], "emotions": ["愤懑感慨"]},
+    "深夜": {"themes": [], "imagery": ["灯", "霜", "蟋蟀", "钟声"], "emotions": ["孤寂冷清"]},
+    "离乡": {"themes": ["思乡羁旅"], "imagery": ["舟", "雁", "灯"], "emotions": ["思念怀想"]},
+    "远行": {"themes": ["思乡羁旅"], "imagery": ["舟", "马", "长亭"], "emotions": []},
 }
 
 

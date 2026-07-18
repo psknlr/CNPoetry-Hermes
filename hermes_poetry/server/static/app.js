@@ -218,7 +218,7 @@ views.scene = async (main) => {
     out.replaceChildren(el("div", { class: "card" }, "构建诗境…"));
     const d = await api.post("/api/scene", { ref: input.value });
     if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
-    const maxAbs = Math.max(1, ...d.emotion_curve.map((v) => Math.abs(v)));
+    const maxAbs = Math.max(1, ...d.emotion_marker_density.map((v) => Math.abs(v)));
     out.replaceChildren(
       el("div", { class: "card" },
         el("h3", {}, `《${esc(d.poem.title)}》`, el("span", { class: "dim" }, `　${esc(d.poem.author)} · ${esc(d.poem.dynasty)} · ${esc(d.poem.genre)}`),
@@ -231,16 +231,18 @@ views.scene = async (main) => {
             l.emotions.length ? "　情感：" + l.emotions.join("、") : "",
             l.negated.length ? "　（否定：" + l.negated.join("、") + "）" : ""),
           l.allusions.length ? el("div", { class: "kv" },
-            "📜 " + l.allusions.map((a) => `${a.allusion}（${a.source}→${a.implies}）`).join("；")) : null,
-          el("div", { style: `height:5px;width:${Math.abs(d.emotion_curve[i]) / maxAbs * 60 + 2}%;` +
-            `background:${d.emotion_curve[i] >= 0 ? "var(--accent2)" : "var(--bad)"};border-radius:2px;margin-top:4px` })))),
+            "📜 疑似用典（候选，待语境确认）：" + l.allusions.map((a) =>
+              `${a.allusion}〔典源候选：${a.source}｜常用义：${a.implies}` +
+              (a.ambiguity_note ? `｜⚠ ${a.ambiguity_note}` : "") + "〕").join("；")) : null,
+          el("div", { style: `height:5px;width:${Math.abs(d.emotion_marker_density[i]) / maxAbs * 60 + 2}%;` +
+            `background:${d.emotion_marker_density[i] >= 0 ? "var(--accent2)" : "var(--bad)"};border-radius:2px;margin-top:4px` })))),
       d.couplets && d.couplets.length ? el("div", { class: "card" }, el("h3", {}, "对仗（B层启发式）"),
         d.couplets.map((c) => el("div", { class: "kv" },
           `${c.couplet}：${c.verdict}｜平仄相对率 ${c.tone_opposition_rate}｜范畴对位率 ${c.category_match_rate ?? "—"}`))) : null,
       el("div", { class: "card dim" }, esc(d.note)));
   };
   input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") run(); });
-  main.replaceChildren(el("h2", {}, "进入一首诗（逐句诗境：意象/情感/平仄/典故 + 情感曲线）"),
+  main.replaceChildren(el("h2", {}, "进入一首诗（逐句：意象/情感标记/平仄/典故候选 + 情感标记密度）"),
     el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "进入")), out);
 };
 

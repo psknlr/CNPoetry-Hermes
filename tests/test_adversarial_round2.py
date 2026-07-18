@@ -107,7 +107,7 @@ class TestRhymePurity(unittest.TestCase):
         _ensure()
         import json
         cls.groups = [json.loads(l) for l in
-                      (config.RULES_RHYME_DIR / "rhyme_partners.jsonl").open(encoding="utf-8")]
+                      (config.RULES_RHYME_DIR / "rhyme_partners.jsonl").read_text(encoding="utf-8").splitlines()]
 
     def test_no_mixed_tone_in_clean_groups(self):
         ping = set("人天年风来春声情长明")   # 常见平声韵脚
@@ -169,7 +169,7 @@ class TestIntertextCleanliness(unittest.TestCase):
         _ensure()
         import json
         rules = [json.loads(l) for l in
-                 (config.RULES_INTERTEXT_DIR / "intertext_rules.jsonl").open(encoding="utf-8")]
+                 (config.RULES_INTERTEXT_DIR / "intertext_rules.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertGreater(len(rules), 8000)  # 全量挖掘不截断
         bad = [r for r in rules if any(k in r["shared_span"]
                                        for k in ("正末", "正旦", "云了", "唱了", "了也"))]

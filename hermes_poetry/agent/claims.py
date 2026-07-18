@@ -21,9 +21,14 @@ from ..textutil import t2s
 RE_POEM_ID = re.compile(r"CNP_[A-Z0-9]+_\d{5}")
 RE_SENT = re.compile(r"[^。！？\n]+[。！？]?")
 
-# 作者归属句式：「《X》是/为 Y 所作/的诗」「Y 的《X》」
+# 作者归属句式（第三轮复审扩展召回）：
+#   《X》是/为 Y 所作         Y 的《X》
+#   《X》的作者是 Y           （唐代）诗人 Y 创作了/写下了《X》
 RE_ATTRIB = re.compile(r"[《〈]([^》〉]{1,20})[》〉](?:是|为|乃)([㐀-鿿]{2,4})(?:所作|的作品|写的|之作)")
 RE_ATTRIB2 = re.compile(r"([㐀-鿿]{2,4})的[《〈]([^》〉]{1,20})[》〉]")
+RE_ATTRIB3 = re.compile(r"[《〈]([^》〉]{1,20})[》〉]的作者(?:是|为|乃)([㐀-鿿]{2,4})")
+RE_ATTRIB4 = re.compile(r"(?:[㐀-鿿]{1,3}代)?(?:诗人|词人|大诗人)?([㐀-鿿]{2,4}?)"
+                        r"(?:创作了|写下了|写了|作了)[《〈]([^》〉]{1,20})[》〉]")
 RE_DYNASTY = re.compile(r"[《〈]([^》〉]{1,20})[》〉]是([㐀-鿿]{1,3})代?(?:的诗|的词|作品)")
 RE_LINECOUNT = re.compile(r"[《〈]([^》〉]{1,20})[》〉][^。]{0,12}?(?:共|全诗)?([一二两三四五六七八九十百\d]+)句")
 # 强解释标记：断言心理状态/唯一确解而无限定语
@@ -83,6 +88,12 @@ class ClaimGuard:
         for m in list(RE_ATTRIB2.finditer(text)):
             author, title = m.group(1), m.group(2)
             if len(author) >= 2 and self._known_author(author):
+                self._check_attrib(rep, title, author, m.group(0))
+        for m in list(RE_ATTRIB3.finditer(text)):
+            self._check_attrib(rep, m.group(1), m.group(2), m.group(0))
+        for m in list(RE_ATTRIB4.finditer(text)):
+            author, title = m.group(1), m.group(2)
+            if self._known_author(author):
                 self._check_attrib(rep, title, author, m.group(0))
         # ── FactualClaim：朝代 ──
         for m in RE_DYNASTY.finditer(text):

@@ -192,7 +192,7 @@ python3 -m hermes_poetry llm-status
 | 资产 | 规模 |
 |---|---|
 | 归一化作品 | 26,720 首（跨集去重保留全本；异文版本并存；元曲支曲救回） |
-| 初始规则（过闸门） | 48,370 条（拒绝 1,052 条，全量审计 ~29 万条） |
+| 初始规则（过闸门） | 48,252 条（拒绝 1,057 条，全量审计 ~29 万条）——权威口径以 `python3 -m hermes_poetry stats` 实时输出为准 |
 | 意象档案 | 50 个（如「月」，相反情感并存如实呈现，证据链跨朝代轮转采样） |
 | 题材/词牌曲牌/诗人档案 | 9 / 578 / 487 个（元曲曲牌已入档；「失调名」占位符剔除） |
 | 韵伴聚类 | 53 组（相邻韵脚连边归纳；平/入声零混杂，如「竹·宿」入声组、「年·天·烟」一先组） |
@@ -216,7 +216,7 @@ python3 -m hermes_poetry llm-status
 
 ```bash
 HERMES_TEST_FAST=1 python3 -m unittest discover -s tests   # 快速层：26 项 <1s
-python3 -m unittest discover -s tests                       # 全量：79 项（含语料级）
+python3 -m unittest discover -s tests                       # 全量：86 项（含语料级）
 ```
 
 `tests/test_review.py` 是「无原文，不成论断」的可执行契约：伪造证据跨度、
@@ -250,5 +250,7 @@ hermes_poetry/
 
 ## 许可
 
-MIT。语料版权归各原始数据集（chinese-poetry MIT；OpenCC Apache-2.0；
-PoetryMTEB 样本按其数据集条款；gujilab CC0）。
+MIT。语料版权归各原始数据集，逐源声明见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（chinese-poetry MIT；
+OpenCC Apache-2.0；韵典网广韵整理本；PoetryMTEB 样本按其数据集条款；
+gujilab CC0）。

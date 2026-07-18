@@ -95,16 +95,26 @@ class Phonology:
 
     # ── 近体标准谱匹配（四起式）───────────────────────────────────
     # 基础句式（王力《诗词格律》通行口径）：
-    # 五言 A仄仄平平仄 B平平仄仄平 C平平平仄仄 D仄仄仄平平；七言前加相反二字
+    # 五言 A仄仄平平仄 B平平仄仄平 C平平平仄仄 D仄仄仄平平；七言前加相反二字。
+    # 起式命名以**首句第二字**平仄为准：五言句式前加相反二字成七言后，
+    # 第二字平仄随之翻转——故七言的名称↔序列映射与五言相反
+    # （此前版本共用同一映射导致七言平起/仄起命名反转，属 P0 领域错误）。
     _BASE5 = {"A": "仄仄平平仄", "B": "平平仄仄平", "C": "平平平仄仄", "D": "仄仄仄平平"}
-    _QISHI = {  # 起式 → 绝句四句的句式序列（律诗 = 重复两遍）
+    _QISHI5 = {  # 五言：起式 → 绝句四句句式序列（律诗 = 重复两遍）
         "仄起不入韵": "ABCD", "仄起入韵": "DBCD",
         "平起不入韵": "CDAB", "平起入韵": "BDAB",
     }
+    _QISHI = tuple(_QISHI5)  # 四起式名称（五七言同名，序列不同）
+
+    @classmethod
+    def _seq_for(cls, qishi: str, char_n: int) -> str:
+        if char_n == 7:  # 七言：名称中的平起/仄起对应五言表的相反项
+            qishi = qishi.replace("平起", "@").replace("仄起", "平起").replace("@", "仄起")
+        return cls._QISHI5[qishi]
 
     @classmethod
     def _template_lines(cls, qishi: str, char_n: int, n_lines: int) -> List[str]:
-        seq = cls._QISHI[qishi] * (2 if n_lines == 8 else 1)
+        seq = cls._seq_for(qishi, char_n) * (2 if n_lines == 8 else 1)
         out = []
         for key in seq:
             base = cls._BASE5[key]
@@ -114,9 +124,12 @@ class Phonology:
             out.append(base)
         return out
 
-    def match_template(self, patterns: List[List[str]]) -> Dict:
+    def match_template(self, patterns: List[List[str]],
+                       first_line_rhymes: Optional[bool] = None) -> Dict:
         """与四种起式标准谱比对：严格位（二四六与句脚）计违例，
-        宽位（一三五）不计；两读/无考按通配处理。拗救不判（诚实边界）。"""
+        宽位（一三五）不计；两读/无考按通配处理。拗救不判（诚实边界）。
+        first_line_rhymes 已判定时，与入韵性质不符的起式加罚（韵部证据
+        优先于声调猜测——首句入韵式首句必收平）。"""
         n = len(patterns)
         if n not in (4, 8) or not patterns or len(set(map(len, patterns))) != 1 \
                 or len(patterns[0]) not in (5, 7):
@@ -132,18 +145,61 @@ class Phonology:
                     if p[j] in ("平", "仄") and p[j] != t[j]:
                         dev.append({"line": i + 1, "pos": j + 1,
                                     "expected": t[j], "got": p[j]})
-            results.append({"qishi": qishi, "deviations": len(dev),
-                            "detail": dev[:6]})
+            penalty = 0
+            if first_line_rhymes is True and "不入韵" in qishi:
+                penalty = 2
+            elif first_line_rhymes is False and qishi.endswith("入韵"):
+                penalty = 2
+            results.append({"qishi": qishi, "deviations": len(dev) + penalty,
+                            "raw_deviations": len(dev), "detail": dev[:6]})
         results.sort(key=lambda r: r["deviations"])
         best = results[0]
-        return {"best_fit": best["qishi"], "deviations": best["deviations"],
+        return {"best_fit": best["qishi"], "deviations": best["raw_deviations"],
                 "deviation_detail": best["detail"],
-                "all_fits": [{"qishi": r["qishi"], "deviations": r["deviations"]}
+                "first_line_rhymes": first_line_rhymes,
+                "all_fits": [{"qishi": r["qishi"], "deviations": r["raw_deviations"]}
                              for r in results],
-                "note": "标准谱四起式比对（严格位=二四六与句脚，宽位一三五不计）；"
+                "note": "标准谱四起式比对（起式以首句第二字定名，五七言映射有别；"
+                        "严格位=二四六与句脚，宽位一三五不计；首句入韵由韵部判定）；"
                         "偏差≠不合律：拗救与变格未判，仅作初筛。"}
 
     # ── 律则检测（近体近似口径，多音不确定如实标注）───────────────
+    def first_line_rhymes(self, lines: List[str], even_feet: List[str]) -> Optional[bool]:
+        """首句入韵判定：首句末字平水韵部与偶数句韵脚有交集（含多音候选）。
+
+        返回 True/False/None（无法判定）。此前版本直接舍弃首句韵脚，
+        导致入韵/不入韵式无法区分（复审 P0 项）。"""
+        if not lines or not even_feet:
+            return None
+        chars1 = cjk_chars(strip_brackets(lines[0]))
+        if not chars1:
+            return None
+        first = chars1[-1]
+        # 先定全诗韵调：偶数句韵脚中单读字的声调众数；比较时首句与韵脚的
+        # 读音都限定在该调内——否则多音字的异调异读（如「留」兼宥韵去声）
+        # 会造成跨调假交集
+        tone_votes = [rs[0]["tone"] for c in even_feet
+                      for rs in [self.char_readings(c)]
+                      if len({r["tone"] for r in rs}) == 1 and rs]
+        rhyme_tone = max(set(tone_votes), key=tone_votes.count) if tone_votes else None
+
+        def ps_of(ch: str) -> set:
+            rs = self.char_readings(ch)
+            if rhyme_tone:
+                rs = [r for r in rs if r["tone"] == rhyme_tone] or []
+            return {pingshui_of(r["yun"]) for r in rs} - {""}
+
+        ps_first = ps_of(first)
+        ps_feet = set()
+        for c in even_feet:
+            ps_feet |= ps_of(c)
+        if not ps_feet:
+            return None
+        if not ps_first:
+            # 首句末字无该调读音 → 必不入韵（如平韵诗首句收仄）
+            return False
+        return bool(ps_first & ps_feet)
+
     def analyze_poem(self, lines: List[str], rhyme_feet: List[str]) -> Dict:
         patterns = [self.line_pattern(ln) for ln in lines]
         issues: List[Dict] = []
@@ -206,7 +262,9 @@ class Phonology:
                     f["decision"] = target
                     f["basis"] = ["同诗其余韵脚均为" + target + "声（押韵一致性反推）"]
                     f["requires_review"] = True
+        first_rhyme = self.first_line_rhymes(lines, rhyme_feet)
         return {
+            "first_line_rhymes": first_rhyme,
             "layer": "B",
             "phonology_system": "Guangyun-derived",
             "target_period": "Middle Chinese approximation",
@@ -215,7 +273,7 @@ class Phonology:
             "line_patterns": ["".join(p) for p in patterns],
             "uncertain_chars": uncertain,
             "issues": issues,
-            "template_match": self.match_template(patterns),
+            "template_match": self.match_template(patterns, first_line_rhymes=first_rhyme),
             "rhyme_feet_phonology": feet_info,
             "rhyme_tone": rhyme_tone,
             "note": "平仄依《广韵》推导（成书1008年，为唐宋作诗音系的近似而非实录）；"
