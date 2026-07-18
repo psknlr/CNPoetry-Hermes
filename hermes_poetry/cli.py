@@ -75,6 +75,22 @@ def main(argv=None) -> int:
     p.add_argument("--poem", default="")
     p.add_argument("--text", default="")
 
+    p = sub.add_parser("scene", help="诗境：逐句多层注解+情感曲线+对仗")
+    p.add_argument("ref")
+
+    p = sub.add_parser("allusion", help="典故检测（种子图谱）")
+    p.add_argument("--text", default="")
+    p.add_argument("--poem", default="")
+
+    p = sub.add_parser("compose", help="创作实验室（今人拟作辅助）")
+    p.add_argument("--genre", default="七绝")
+    p.add_argument("--rhyme-char", default="")
+    p.add_argument("--mood", default="")
+    p.add_argument("--avoid", default="", help="排除意象（逗号分隔）")
+
+    p = sub.add_parser("bench", help="CNPoetryBench 对抗题库")
+    p.add_argument("--n", type=int, default=8)
+
     p = sub.add_parser("gloss", help="字义训诂（C层：说文解字/尔雅）")
     p.add_argument("--chars", default="", help="1-8 个汉字")
     p.add_argument("--poem", default="", help="按作品取高频字训诂")
@@ -181,6 +197,22 @@ def main(argv=None) -> int:
         _print(engine.rhyme_query(args.char, args.poem))
     elif args.cmd == "intertext":
         _print(engine.intertext_query(args.poem, args.text))
+    elif args.cmd == "scene":
+        _print(engine.scene(args.ref))
+    elif args.cmd == "allusion":
+        from .induce.allusions import detect_allusions
+        if args.poem:
+            p2 = engine.resolve_poem(args.poem)
+            _print({"allusions": detect_allusions(p2.text)} if p2 else {"error": "未解析"})
+        else:
+            _print({"allusions": detect_allusions(args.text)})
+    elif args.cmd == "compose":
+        from .apps.compose import compose_helper
+        avoid = [x for x in args.avoid.replace("，", ",").split(",") if x]
+        _print(compose_helper(args.genre, args.rhyme_char, args.mood, avoid, engine))
+    elif args.cmd == "bench":
+        from .eval.bench import run_bench
+        _print(run_bench(args.n))
     elif args.cmd == "gloss":
         _print(engine.gloss_query(args.chars, args.poem))
     elif args.cmd == "research":

@@ -210,6 +210,40 @@ views.council = async (main) => {
     el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "合议")), out);
 };
 
+
+views.scene = async (main) => {
+  const input = el("input", { placeholder: "《静夜思》 / 《无题》@李商隐", style: "flex:1" });
+  const out = el("div", {});
+  const run = async () => {
+    out.replaceChildren(el("div", { class: "card" }, "构建诗境…"));
+    const d = await api.post("/api/scene", { ref: input.value });
+    if (d.error) { out.replaceChildren(el("div", { class: "card err" }, errText(d.error))); return; }
+    const maxAbs = Math.max(1, ...d.emotion_curve.map((v) => Math.abs(v)));
+    out.replaceChildren(
+      el("div", { class: "card" },
+        el("h3", {}, `《${esc(d.poem.title)}》`, el("span", { class: "dim" }, `　${esc(d.poem.author)} · ${esc(d.poem.dynasty)} · ${esc(d.poem.genre)}`),
+          el("span", { class: "pid", onclick: () => openPoem(d.poem.poem_id) }, " " + d.poem.poem_id)),
+        ...d.lines.map((l, i) => el("div", { class: "hit" },
+          el("div", { class: "t", style: "font-size:17px" }, l.line),
+          el("div", { class: "meta" },
+            el("span", { class: "layer B" }, l.tone_pattern || "—"),
+            l.imagery.length ? "　意象：" + l.imagery.join("、") : "",
+            l.emotions.length ? "　情感：" + l.emotions.join("、") : "",
+            l.negated.length ? "　（否定：" + l.negated.join("、") + "）" : ""),
+          l.allusions.length ? el("div", { class: "kv" },
+            "📜 " + l.allusions.map((a) => `${a.allusion}（${a.source}→${a.implies}）`).join("；")) : null,
+          el("div", { style: `height:5px;width:${Math.abs(d.emotion_curve[i]) / maxAbs * 60 + 2}%;` +
+            `background:${d.emotion_curve[i] >= 0 ? "var(--accent2)" : "var(--bad)"};border-radius:2px;margin-top:4px` })))),
+      d.couplets && d.couplets.length ? el("div", { class: "card" }, el("h3", {}, "对仗（B层启发式）"),
+        d.couplets.map((c) => el("div", { class: "kv" },
+          `${c.couplet}：${c.verdict}｜平仄相对率 ${c.tone_opposition_rate}｜范畴对位率 ${c.category_match_rate ?? "—"}`))) : null,
+      el("div", { class: "card dim" }, esc(d.note)));
+  };
+  input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") run(); });
+  main.replaceChildren(el("h2", {}, "进入一首诗（逐句诗境：意象/情感/平仄/典故 + 情感曲线）"),
+    el("div", { class: "row" }, input, el("button", { class: "go", onclick: run }, "进入")), out);
+};
+
 views.search = async (main) => {
   const input = el("input", { placeholder: "诗句/意象/《题名》/作者…", style: "flex:1" });
   const dyn = el("select", {}, ["", "先秦", "汉魏", "唐", "五代", "宋", "元", "清"].map((d) =>

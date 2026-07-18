@@ -99,6 +99,9 @@ class ServiceContext:
     def intertext(self, body: Dict) -> Dict:
         return self.engine.intertext_query(body.get("poem_ref", ""), body.get("text", ""))
 
+    def scene(self, body: Dict) -> Dict:
+        return self.engine.scene(body.get("ref", ""))
+
     def gloss(self, body: Dict) -> Dict:
         return self.engine.gloss_query(body.get("chars", ""), body.get("poem_ref", ""))
 

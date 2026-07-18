@@ -66,8 +66,14 @@ python3 -m hermes_poetry differential "《静夜思》" "《月下独酌》"
 python3 -m hermes_poetry poem "《春晓》"
 python3 -m hermes_poetry poem "《无题》@李商隐"     # 不指定则返回候选消歧卡
 
-# 格律（句式 + 平仄/韵部/近体律则，依《广韵》，多音字标两读）
+# 格律（句式 + 平仄/韵部/近体律则，依《广韵》；平水韵/词林正韵由广韵合并推导）
 python3 -m hermes_poetry metrics "《春晓》"          # → 仄韵（篠/小韵）、失粘检出
+
+# 诗境 / 典故 / 创作实验室 / 对抗基准
+python3 -m hermes_poetry scene "《静夜思》"          # 逐句意象/情感/平仄/典故+情感曲线
+python3 -m hermes_poetry allusion --text "西出阳关无故人"
+python3 -m hermes_poetry compose --genre 七绝 --mood 深夜离乡 --avoid 月 --rhyme-char 乡
+python3 -m hermes_poetry bench                       # CNPoetryBench 六类对抗任务
 
 # 教学（题材/体裁/意象/诗人）
 python3 -m hermes_poetry teach 送别怀人

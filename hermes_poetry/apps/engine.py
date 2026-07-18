@@ -425,6 +425,40 @@ class Engine:
                 "source": "说文解字/尔雅（gujilab/chinese-classical-corpus，CC0）",
                 "note": "训诂为字书本义，诗中用义可能引申；本层为 C 层旁证。"}
 
+    # ── 诗境（进入一首诗：逐句多层注解 + 情感曲线）─────────────────
+    def scene(self, ref: str) -> Dict:
+        p = self.resolve_poem(ref)
+        if p is None:
+            return self.err("POEM_NOT_FOUND", f"无法解析作品「{ref}」")
+        from ..extract.annotate import annotate_line
+        from ..extract.phonology import get_phonology
+        from ..induce.allusions import detect_allusions
+        ph = get_phonology()
+        lines_out, curve = [], []
+        for i, ln in enumerate(p.lines):
+            h = annotate_line(ln, i)
+            pat = "".join(ph.line_pattern(ln)) if ph.ready else ""
+            pos = len(h.emotions)
+            neg = len(h.negated_emotions)
+            curve.append(pos - neg)
+            lines_out.append({
+                "line": ln, "index": i + 1, "tone_pattern": pat,
+                "imagery": [c for c, _ in h.imagery],
+                "emotions": [c for c, _ in h.emotions],
+                "negated": [c for c, _ in h.negated_emotions],
+                "allusions": detect_allusions(ln),
+            })
+        duizhang = []
+        if len(p.lines) == 8:
+            from ..extract.couplet import analyze_regulated
+            duizhang = analyze_regulated(p.lines)
+        return {"poem": {"poem_id": p.poem_id, "title": p.title, "author": p.author,
+                         "dynasty": p.dynasty, "genre": p.genre},
+                "lines": lines_out, "emotion_curve": curve,
+                "couplets": duizhang, "layer_legend": config.LAYER_LABEL,
+                "note": "逐句标注均为确定性层（A字面/B音韵/种子典故）；"
+                        "语篇与诗学层解释见五层标注器（需真实大模型）。"}
+
     # ── 研究端 ───────────────────────────────────────────────────
     def research(self, topic: str = "") -> Dict:
         try:
