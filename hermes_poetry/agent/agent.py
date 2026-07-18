@@ -66,10 +66,15 @@ class PoetryAgent:
         if ig["notice"]:
             answer = ig["notice"] + "\n\n" + answer
         final = self.guard.annotate(answer, report)
+        # 第二道闸门：论断分型核验（归属/数字/过度阐释）
+        from .claims import ClaimGuard, annotate_claims
+        claim_report = ClaimGuard(self.registry.engine).check(final)
+        final = annotate_claims(final, claim_report)
         return governed({
             "question": question,
             "answer": final,
             "citation_report": report.to_dict(),
+            "claim_report": claim_report.to_dict(),
             "tool_trace": [{"tool": t["tool"], "arguments": t["arguments"]} for t in tool_results],
             "evidence_ids": self._evidence_ids(tool_results),
             "skill_route": skill_route,

@@ -78,7 +78,19 @@ class Engine:
             return ""
 
     # ── 基础 ────────────────────────────────────────────────────
+    @staticmethod
+    def err(code: str, message: str, recoverable: bool = True, **extra) -> Dict:
+        """结构化错误（供前端/智能体/调用方恢复），保留 message 便于展示。"""
+        e = {"code": code, "message": message, "recoverable": recoverable}
+        e.update(extra)
+        return {"error": e}
+
+    def resolve_candidates(self, title: str) -> List[Poem]:
+        """同题候选（消歧卡片用）。"""
+        return list(self.rag._title_index.get(t2s(title.strip("《》〈〉")), []))
+
     def resolve_poem(self, ref: str) -> Optional[Poem]:
+        """支持消歧语法：《题名》@作者（如 《春晓》@孟浩然）。"""
         ref = (ref or "").strip()
         if ref in self.by_id:
             return self.by_id[ref]
@@ -86,7 +98,16 @@ class Engine:
         m = re.search(r"CNP_[A-Z0-9]+_\d{5}", ref)
         if m and m.group(0) in self.by_id:
             return self.by_id[m.group(0)]
+        author_hint = ""
+        if "@" in ref:
+            ref, _, author_hint = ref.partition("@")
+            ref = ref.strip()
+            author_hint = t2s(author_hint.strip())
         title = ref.strip("《》〈〉")
+        if author_hint:
+            cands = [p for p in self.resolve_candidates(title) if t2s(p.author) == author_hint]
+            if cands:
+                return cands[0]
         hits = self.rag.search(f"《{title}》", top_k=1)
         if hits and hits[0]["match_source"] == "direct_title":
             return self.by_id[hits[0]["poem_id"]]
@@ -291,9 +312,20 @@ class Engine:
 
     # ── 作品全息 ─────────────────────────────────────────────────
     def explain_poem(self, ref: str) -> Dict:
+        # 同题多作且未指定作者 → 返回消歧候选卡（不猜）
+        bare = (ref or "").strip()
+        if "@" not in bare and not bare.startswith("CNP_"):
+            cands = self.resolve_candidates(bare)
+            distinct_authors = {t2s(c.author) for c in cands}
+            if len(cands) > 1 and len(distinct_authors) > 1:
+                return self.err(
+                    "POEM_AMBIGUOUS", f"存在多首同题作品《{bare.strip('《》〈〉')}》，请以 @作者 指定",
+                    candidates=[{"poem_id": c.poem_id, "author": c.author, "dynasty": c.dynasty,
+                                 "first_line": c.lines[0] if c.lines else "",
+                                 "ref": f"《{c.title}》@{c.author}"} for c in cands[:6]])
         p = self.resolve_poem(ref)
         if p is None:
-            return {"error": f"无法解析作品「{ref}」（可用 poem_id 或《题名》）。"}
+            return self.err("POEM_NOT_FOUND", f"无法解析作品「{ref}」（可用 poem_id 或《题名》@作者）")
         related_intertext = [r for r in self.intertext_rules
                              if p.poem_id in (r["source_poem_id"], r["target_poem_id"])][:6]
         ext = self._ext_by_poem.get(p.poem_id)
@@ -392,6 +424,40 @@ class Engine:
         return {"glosses": entries, "poem_id": context, "layer": "C",
                 "source": "说文解字/尔雅（gujilab/chinese-classical-corpus，CC0）",
                 "note": "训诂为字书本义，诗中用义可能引申；本层为 C 层旁证。"}
+
+    # ── 诗境（进入一首诗：逐句多层注解 + 情感曲线）─────────────────
+    def scene(self, ref: str) -> Dict:
+        p = self.resolve_poem(ref)
+        if p is None:
+            return self.err("POEM_NOT_FOUND", f"无法解析作品「{ref}」")
+        from ..extract.annotate import annotate_line
+        from ..extract.phonology import get_phonology
+        from ..induce.allusions import detect_allusions
+        ph = get_phonology()
+        lines_out, curve = [], []
+        for i, ln in enumerate(p.lines):
+            h = annotate_line(ln, i)
+            pat = "".join(ph.line_pattern(ln)) if ph.ready else ""
+            pos = len(h.emotions)
+            neg = len(h.negated_emotions)
+            curve.append(pos - neg)
+            lines_out.append({
+                "line": ln, "index": i + 1, "tone_pattern": pat,
+                "imagery": [c for c, _ in h.imagery],
+                "emotions": [c for c, _ in h.emotions],
+                "negated": [c for c, _ in h.negated_emotions],
+                "allusions": detect_allusions(ln),
+            })
+        duizhang = []
+        if len(p.lines) == 8:
+            from ..extract.couplet import analyze_regulated
+            duizhang = analyze_regulated(p.lines)
+        return {"poem": {"poem_id": p.poem_id, "title": p.title, "author": p.author,
+                         "dynasty": p.dynasty, "genre": p.genre},
+                "lines": lines_out, "emotion_curve": curve,
+                "couplets": duizhang, "layer_legend": config.LAYER_LABEL,
+                "note": "逐句标注均为确定性层（A字面/B音韵/种子典故）；"
+                        "语篇与诗学层解释见五层标注器（需真实大模型）。"}
 
     # ── 研究端 ───────────────────────────────────────────────────
     def research(self, topic: str = "") -> Dict:

@@ -96,11 +96,11 @@ def apply_metrics(poem: Poem) -> None:
         poem.genre, poem.genre_source = m["form_metric"], "metric"
 
 
-def describe(poem: Poem) -> Dict:
-    """格律说明（工具/教学端展示用）。"""
+def describe(poem: Poem, tonal: bool = True) -> Dict:
+    """格律说明（工具/教学端展示用）。tonal=True 时附中古音平仄层。"""
     m = poem.metrics or detect_form(poem)
     lines_desc = char_pattern(m["char_counts"])
-    return {
+    out = {
         "poem_id": poem.poem_id,
         "title": poem.title,
         "genre": poem.genre,
@@ -110,8 +110,15 @@ def describe(poem: Poem) -> Dict:
         "uniform": m["uniform"],
         "rhyme_feet": m["rhyme_feet"],
         "layer": "B",
-        "note": "本层为确定性计量：不判平仄与对仗；韵伴归属见韵伴聚类（语料归纳）。",
+        "note": "句式为确定性计量；平仄依《广韵》韵目定调（多音字标两读）；"
+                "韵伴归属见韵伴聚类（语料归纳）。",
     }
+    if tonal:
+        from .phonology import get_phonology
+        ph = get_phonology()
+        if ph.ready:
+            out["tonal"] = ph.analyze_poem(poem.lines, m.get("rhyme_feet", []))
+    return out
 
 
 def form_distribution(poems: List[Poem]) -> Dict[str, int]:

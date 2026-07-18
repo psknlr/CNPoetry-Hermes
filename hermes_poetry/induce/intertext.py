@@ -31,8 +31,15 @@ RE_KEBAI = _re.compile(
 
 class IntertextMiner:
     def __init__(self, poems: List[Poem]):
+        from .. import config as _cfg
         self.poems = poems
         self.folded: Dict[str, str] = {p.poem_id: content_only(t2s(p.text)) for p in poems}
+        self._dyn_rank: Dict[str, int] = {
+            p.poem_id: (_cfg.DYNASTY_ORDER.index(p.dynasty)
+                        if p.dynasty in _cfg.DYNASTY_ORDER else -1)
+            for p in poems}
+        self._dyn: Dict[str, str] = {p.poem_id: p.dynasty for p in poems}
+        self._src: Dict[str, str] = {p.poem_id: p.source for p in poems}
         self.index: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
         cap = GENERIC_DF_CAP
         counts: Dict[str, int] = defaultdict(int)
@@ -107,6 +114,17 @@ class IntertextMiner:
                 else:
                     mode = "化用"
                 seq += 1
+                # 年代方向：先出者为被化用方；同代/无考不定向。
+                # 同集内（尤其诗经）短套语疑共源而非直接承继。
+                ra, rb = self._dyn_rank[pair[0]], self._dyn_rank[pair[1]]
+                if ra >= 0 and rb >= 0 and ra != rb:
+                    direction = "later_borrows_earlier"
+                    earlier = pair[0] if ra < rb else pair[1]
+                else:
+                    direction, earlier = "undetermined", ""
+                common_src = (self._src[pair[0]] == self._src[pair[1]]
+                              and self._src[pair[0]] in ("SHIJING", "CHUCI")
+                              and span_len < 8)
                 rules.append(IntertextRule(
                     intertext_rule_id=f"ITR_{seq:05d}",
                     source_poem_id=pair[0],
@@ -115,6 +133,11 @@ class IntertextMiner:
                     span_len=span_len,
                     similarity=round(coverage, 3),
                     mode=mode,
+                    relation_direction=direction,
+                    earlier_poem_id=earlier,
+                    source_dynasty=self._dyn[pair[0]],
+                    target_dynasty=self._dyn[pair[1]],
+                    possible_common_source=common_src,
                 ))
                 if len(rules) >= max_rules:
                     return rules

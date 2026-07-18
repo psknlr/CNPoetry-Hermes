@@ -209,7 +209,15 @@ class LocalProvider:
         if not isinstance(payload, dict):
             return ""
         if payload.get("error"):
-            return f"（工具错误：{payload['error']}）"
+            e = payload["error"]
+            if isinstance(e, dict):
+                msg = e.get("message", e.get("code", ""))
+                if e.get("candidates"):
+                    cands = "；".join(c.get("ref", "") or f"{c.get('author','')}"
+                                      for c in e["candidates"][:4])
+                    msg += f"（候选：{cands}）"
+                return f"（{msg}）"
+            return f"（工具错误：{e}）"
         # 检索/荐诗类
         hits = payload.get("hits") or payload.get("recommendations")
         if hits:
@@ -235,9 +243,20 @@ class LocalProvider:
         # 格律
         if payload.get("metrics"):
             m = payload["metrics"]
-            return (f"《{m.get('title')}》格律计量（B层）：体裁 {m.get('genre')}（{m.get('genre_source')}），"
+            base = (f"《{m.get('title')}》格律（B层）：体裁 {m.get('genre')}（{m.get('genre_source')}），"
                     f"{m.get('line_count')} 句，句式 {m.get('char_pattern')}，"
                     f"韵脚位置字 {'、'.join(m.get('rhyme_feet', []))}。［{m.get('poem_id','')}］")
+            tonal = m.get("tonal") or {}
+            if tonal.get("line_patterns"):
+                pats = "；".join(tonal["line_patterns"][:4])
+                iss = tonal.get("issues") or []
+                iss_s = "、".join(f"{x['rule']}" for x in iss[:4]) if iss else "未检出违例"
+                yun = "、".join(y for f in tonal.get("rhyme_feet_phonology", [])
+                                for y in f.get("yun", [])[:1])
+                base += (f"\n平仄（依《广韵》，多音标两读）：{pats}。近体律则：{iss_s}。"
+                         f"{tonal.get('rhyme_tone','')}" + (f"，韵部 {yun}" if yun else "")
+                         + f"。{tonal.get('note','')}")
+            return base
         # 词牌
         if payload.get("cipai_profile"):
             r = payload["cipai_profile"]

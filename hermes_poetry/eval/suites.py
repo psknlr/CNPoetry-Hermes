@@ -111,7 +111,9 @@ def eval_grounding(limit: int = 24) -> Dict:
     return {"suite": "grounding", "n": n,
             "citation_ok_rate": round(ok / n, 3) if n else None,
             "has_citation_rate": round(cited / n, 3) if n else None,
-            "backend": agent.client.backend}
+            "backend": agent.client.backend,
+            "note": "本套件衡量『检索落地与引用编排正确性』；local 为确定性后端，"
+                    "其高分不代表语言模型的诗学理解能力（解释质量需另行人评/LLM评）。"}
 
 
 def run_suites(suite: str = "all", limit: int = 200) -> Dict:

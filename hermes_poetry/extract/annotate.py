@@ -14,6 +14,28 @@ from ..lexicon import EMOTION_SURFACE, IMAGERY_SURFACE, NEGATION_PREFIX, THEME_S
 from ..schemas import Poem
 from ..textutil import t2s
 
+# 否定词与标记之间可被跨越的中性字（「不是愁」「不见愁」「未必愁」）
+_NEG_BRIDGE = set("是见得必成为曾复即在有")
+
+
+def negation_scope(folded: str, idx: int, window: int = 3) -> bool:
+    """标记位 idx 之前 window 字内是否存在管辖它的否定词。
+
+    仅跨越中性桥接字；遇实义字即停（「离愁」的「离」不是桥，
+    不会让更前面的否定词越界管辖）。
+    """
+    steps = 0
+    j = idx - 1
+    while j >= 0 and steps < window:
+        ch = folded[j]
+        if ch in NEGATION_PREFIX:
+            return True
+        if ch not in _NEG_BRIDGE:
+            return False
+        j -= 1
+        steps += 1
+    return False
+
 
 @dataclass
 class LineHits:
@@ -55,7 +77,7 @@ def annotate_line(line: str, line_idx: int) -> LineHits:
     # 单字意象「云」吃掉更长的情感标记「凌云」（违背最长优先）
     taken_e = [False] * len(folded)
     for cat, marker, idx in _match_terms(folded, EMOTION_SURFACE, taken_e):
-        if idx > 0 and folded[idx - 1] in NEGATION_PREFIX:
+        if negation_scope(folded, idx):
             out.negated_emotions.append((cat, marker))
         else:
             out.emotions.append((cat, marker))

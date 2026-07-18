@@ -1,4 +1,10 @@
 """服务端测试：真实 HTTP 往返、鉴权、护栏。"""
+import os as _os
+import unittest as _ut
+if _os.environ.get("HERMES_TEST_FAST") == "1":
+    raise _ut.SkipTest("fast mode：跳过需装载语料/规则库的测试（HERMES_TEST_FAST=1）")
+
+
 import json
 import threading
 import unittest

@@ -258,6 +258,7 @@ class RhymePartnerRule(JsonRecord):
     n_poems: int = 0
     edge_examples: List[Dict[str, Any]] = field(default_factory=list)
     supporting_poems: List[str] = field(default_factory=list)
+    yun_profile: Dict[str, Any] = field(default_factory=dict)  # 广韵交叉验证（韵目分布/声调纯度）
     source_level: str = "corpus_induction"
     release_level: str = "silver"
     note: str = "韵伴聚类由近体诗偶数句尾字共现归纳，非平水韵权威表。"
@@ -272,6 +273,12 @@ class IntertextRule(JsonRecord):
     span_len: int = 0
     similarity: float = 0.0
     mode: str = ""                # 重出互见|袭用|化用|存疑
+    # 年代方向性：后出可化用先出，反向不成立；同代/无考不定向
+    relation_direction: str = "undetermined"   # later_borrows_earlier|undetermined
+    earlier_poem_id: str = ""
+    source_dynasty: str = ""
+    target_dynasty: str = ""
+    possible_common_source: bool = False       # 疑共源（如诗经套语），非直接承继
     source_level: str = "corpus_induction"
     release_level: str = "silver"
 

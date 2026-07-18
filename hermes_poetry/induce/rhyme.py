@@ -97,6 +97,21 @@ class RhymeInducer:
             note = "韵伴聚类由近体诗（4/8句、5/7言）偶数句尾字共现归纳，非平水韵权威表。"
             if low_purity:
                 note += "（本组规模异常：通押/邻韵可能打通连通性，仅供研究参考。）"
+            # 广韵交叉验证：报告本组成员的韵目分布与声调纯度（B层旁证）
+            yun_profile = {}
+            try:
+                from ..extract.phonology import get_phonology
+                ph = get_phonology()
+                if ph.ready:
+                    yun_profile = ph.group_yun_profile(members)
+                    tones = yun_profile.get("tone_distribution", {})
+                    determined = sum(tones.values())
+                    if determined:
+                        dom_tone, dom_n = max(tones.items(), key=lambda kv: kv[1])
+                        yun_profile["tone_purity"] = round(dom_n / determined, 3)
+                        yun_profile["dominant_tone"] = dom_tone
+            except RuntimeError:
+                pass
             rules.append(RhymePartnerRule(
                 rhyme_rule_id=f"RPR_{i:03d}",
                 label=label,
@@ -104,6 +119,7 @@ class RhymeInducer:
                 n_poems=len(support),
                 edge_examples=[{"pair": list(k), "co_occurrence": w} for k, w in comp_edges[:10]],
                 supporting_poems=sorted(support)[:60],
+                yun_profile=yun_profile,
                 release_level="bronze" if low_purity else "silver",
                 note=note,
             ))

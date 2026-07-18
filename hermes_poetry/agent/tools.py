@@ -115,6 +115,32 @@ class ToolRegistry:
         add("poetry_research", "研究端：意象共现网络、朝代分布、情感×意象矩阵。",
             {"topic": {"type": "string"}}, lambda topic="": e.research(topic))
         add("poetry_stats", "语料与规则库统计。", {}, lambda: {"stats": e.stats()})
+        add("poetry_scene", "诗境：逐句多层注解（意象/情感/平仄/典故）+ 情感曲线 + 对仗。",
+            {"poem_ref": {"type": "string"}},
+            lambda poem_ref="": e.scene(poem_ref), required=["poem_ref"])
+        add("poetry_allusion", "典故检测（精选种子图谱）：出处与常用义。",
+            {"text": {"type": "string"}, "poem_ref": {"type": "string"}},
+            self._allusion)
+        add("poetry_compose", "创作实验室（今人拟作辅助）：平仄模板/韵部候选/意象建议。",
+            {"genre": {"type": "string"}, "rhyme_char": {"type": "string"},
+             "mood": {"type": "string"}, "avoid_imagery": {"type": "array"}},
+            lambda genre="七绝", rhyme_char="", mood="", avoid_imagery=None:
+                __import__("hermes_poetry.apps.compose", fromlist=["compose_helper"])
+                .compose_helper(genre, rhyme_char, mood, avoid_imagery, self.engine))
+        add("poetry_check_draft", "创作草稿检查：平仄/律则/撞句提醒（今人拟作）。",
+            {"lines": {"type": "array"}},
+            lambda lines=None: __import__("hermes_poetry.apps.compose", fromlist=["check_draft"])
+                .check_draft(lines or []), required=["lines"])
+
+    def _allusion(self, text="", poem_ref="") -> Dict:
+        from ..induce.allusions import detect_allusions
+        if poem_ref:
+            p = self.engine.resolve_poem(poem_ref)
+            if p is None:
+                return self.engine.err("POEM_NOT_FOUND", f"无法解析「{poem_ref}」")
+            return {"poem_id": p.poem_id, "allusions": detect_allusions(p.text)}
+        return {"allusions": detect_allusions(text)} if text else \
+            self.engine.err("MISSING_ARG", "需提供 text 或 poem_ref")
 
     # ── 复合处理器 ───────────────────────────────────────────────
     def _differential(self, poem_refs=None, query="") -> Dict:
