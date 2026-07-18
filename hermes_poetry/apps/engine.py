@@ -431,8 +431,189 @@ class Engine:
                     "note": "韵伴聚类为语料归纳，非平水韵权威表。"}
         ch = t2s((char or "").strip())[:1]
         groups = [r for r in self.rhyme_rules if ch in r["members"]]
-        return {"char": ch, "groups": groups[:3],
+        out_groups = []
+        for g in groups[:3]:
+            g2 = dict(g)
+            g2["verse_examples"] = self._rhyme_verse_examples(ch, g)
+            out_groups.append(g2)
+        return {"char": ch, "groups": out_groups,
                 "note": "韵伴聚类为语料归纳，非平水韵权威表。"}
+
+    def _rhyme_verse_examples(self, ch: str, group: Dict, cap: int = 8) -> List[Dict]:
+        """从韵组支撑诗中取实押例句：查询字与同组韵伴同诗互押的原句。"""
+        members = set(group.get("members") or [])
+        out: List[Dict] = []
+        for pid in group.get("supporting_poems") or []:
+            p = self.by_id.get(pid)
+            if p is None:
+                continue
+            feet_lines: List[Dict] = []
+            hit_char = False
+            for i, ln in enumerate(p.lines):
+                chars = content_only(t2s(ln))
+                if not chars or (i % 2 == 0 and len(p.lines) > 2):
+                    continue  # 例句取偶数句（韵脚位）；短章不限
+                foot = chars[-1]
+                if foot in members:
+                    feet_lines.append({"line": ln, "foot": foot})
+                    if foot == ch:
+                        hit_char = True
+            if hit_char and len(feet_lines) >= 2:
+                out.append({"poem_id": p.poem_id, "title": p.title, "author": p.author,
+                            "dynasty": p.dynasty,
+                            "rhyming_lines": feet_lines[:4]})
+            if len(out) >= cap:
+                break
+        return out
+
+    # ── 诗人别名 / 词牌全景 / 意象全量例证 / 飞花令 ────────────────
+    def resolve_author(self, name: str) -> Dict:
+        """诗人名解析：直接命中 → 字号别名（苏东坡→苏轼）→ 建议列表。"""
+        from ..lexicon import canonical_author
+        raw = t2s((name or "").strip())
+        if raw in self.author_profiles:
+            return {"status": "unique", "author": raw, "via": ""}
+        canon = canonical_author(raw)
+        if canon != raw and canon in self.author_profiles:
+            return {"status": "unique", "author": canon, "via": f"别名归并：{raw}→{canon}"}
+        sugg = [a for a in self.author_profiles if raw and raw in a][:8]
+        return {"status": "not_found", "author": "", "suggestions": sugg}
+
+    def cipai_query(self, name: str) -> Dict:
+        """词牌全景：龙谱权威层 + 语料归纳定格 + 全部例词（可点击）。"""
+        from ..corpus.cipu import cipu_index
+        from ..lexicon import CIPAI_ALIAS_GROUPS
+        q = t2s((name or "").strip())
+        if not q:
+            return {"error": {"code": "EMPTY_QUERY", "message": "请给出词牌名", "recoverable": True}}
+        if not hasattr(self, "_cipu_idx"):
+            self._cipu_idx = cipu_index()
+        pu = self._cipu_idx.get(q)
+        # 语料归纳档案：精确 → 别名组内互查 → 键内子串（语料键多为「望江南・忆江南」复合名）
+        prof = self.cipai_profiles.get(q)
+        via = ""
+        if prof is None:
+            candidates = {q}
+            for grp in CIPAI_ALIAS_GROUPS:
+                if q in grp:
+                    candidates.update(grp)
+            if pu:
+                candidates.add(t2s(pu["cipai"]))
+                candidates.update(t2s(a) for a in pu.get("aliases") or [])
+            best = None
+            for key, r in self.cipai_profiles.items():
+                if any(c == key or c in key for c in candidates):
+                    if best is None or r["n_poems"] > best[1]["n_poems"]:
+                        best = (key, r)
+            if best:
+                prof, via = best[1], (f"同调异名归并：{q}→{best[0]}" if best[0] != q else "")
+        all_poems = []
+        if prof:
+            for pid in prof.get("supporting_poems") or []:
+                p = self.by_id.get(pid)
+                if p:
+                    all_poems.append({"poem_id": pid, "title": p.title,
+                                      "author": p.author, "dynasty": p.dynasty})
+        if pu is None and prof is None:
+            avail = [k for k in self.cipai_profiles if q and (q in k or k in q)][:8]
+            return {"error": {"code": "CIPAI_NOT_FOUND", "message": f"无词牌「{q}」的词谱或语料档案",
+                              "recoverable": True, "candidates": avail}}
+        return {"query": q, "resolved_via": via,
+                "cipu": pu,   # 词谱权威层（龙榆生），可为 None
+                "cipai_profile": prof,  # 语料归纳层，可为 None
+                "all_poems": all_poems,
+                "note": "词谱层为龙榆生《唐宋词格律》权威谱；定格层为语料归纳（众数句式），"
+                        "两层并列互证；例词为语料全部支撑作品。"}
+
+    def imagery_examples(self, name: str) -> Dict:
+        """意象全量例证：从支撑规则回溯全部作品，附命中原句，可点击回源。"""
+        canon = t2s((name or "").strip())
+        prof = self.imagery_profiles.get(canon)
+        if prof is None:
+            return {"error": f"无意象档案「{canon}」", "available": list(self.imagery_profiles)}
+        surfaces = sorted({t2s(s) for s in (prof.get("surface_forms") or [canon])},
+                          key=len, reverse=True)
+        pids: List[str] = []
+        seen = set()
+        for rid in prof.get("supporting_initial_rules") or []:
+            stem = rid.replace("IR_", "", 1).rsplit("_", 1)[0]
+            if stem not in seen:
+                seen.add(stem)
+                pids.append(stem)
+        examples = []
+        for pid in pids:
+            p = self.by_id.get(pid)
+            if p is None:
+                continue
+            quote = next((ln for ln in p.lines
+                          if any(s in t2s(ln) for s in surfaces)), "")
+            examples.append({"poem_id": pid, "title": p.title, "author": p.author,
+                             "dynasty": p.dynasty, "quote": quote})
+        return {"imagery": canon, "n_total": prof.get("n_poems"),
+                "n_listed": len(examples), "examples": examples,
+                "note": ("全量例证按支撑规则回溯"
+                         + ("；档案存证上限内列出，总支撑数以 n_total 为准"
+                            if prof.get("n_poems", 0) > len(examples) else ""))}
+
+    def feihua(self, char: str, exclude_ids: Optional[List[str]] = None,
+               user_line: str = "", round_no: int = 0) -> Dict:
+        """飞花令：校验用户句（须语料实有且含令字），并回一句未用过的应对。"""
+        from ..textutil import contains_verbatim, cjk_chars
+        ch = t2s((char or "").strip())[:1]
+        if not ch:
+            return {"error": {"code": "EMPTY_CHAR", "message": "请给出令字（单字）",
+                              "recoverable": True}}
+        exclude = set(exclude_ids or [])
+        out: Dict = {"char": ch}
+        if user_line and user_line.strip():
+            ul = user_line.strip()
+            folded = "".join(cjk_chars(t2s(ul)))
+            check: Dict = {"line": ul, "valid": False, "reason": ""}
+            if ch not in folded:
+                check["reason"] = f"句中不含令字「{ch}」"
+            elif len(folded) < 4:
+                check["reason"] = "句子过短（至少四字）"
+            else:
+                hit = None
+                for h in self.rag.search(ul, top_k=5):
+                    p = self.by_id.get(h["poem_id"])
+                    if p and contains_verbatim(p.text, ul):
+                        hit = p
+                        break
+                if hit is None:
+                    check["reason"] = "语料未见此句（须原句实有，简繁不限）"
+                else:
+                    check.update(valid=True, poem_id=hit.poem_id, title=hit.title,
+                                 author=hit.author, dynasty=hit.dynasty)
+                    exclude.add(hit.poem_id)
+            out["user_check"] = check
+        # 应对句：确定性遍历（按令字+轮次错开起点），取含令字的完整原句；
+        # 首选诗/词体，元曲科白味句子仅在无诗词可用时兜底
+        reply = fallback = None
+        n = len(self.poems)
+        start = (hash((ch, int(round_no))) % n + n) % n
+        for k in range(n):
+            p = self.poems[(start + k) % n]
+            if p.poem_id in exclude:
+                continue
+            for ln in p.lines:
+                folded = t2s(ln)
+                if ch in folded and 4 <= len(content_only(folded)) <= 12:
+                    cand = {"poem_id": p.poem_id, "title": p.title, "author": p.author,
+                            "dynasty": p.dynasty, "line": ln}
+                    if "曲" in (p.genre or "") or p.source == "YUANQU":
+                        fallback = fallback or cand
+                    else:
+                        reply = cand
+                    break
+            if reply:
+                break
+        reply = reply or fallback
+        out["reply"] = reply
+        out["note"] = ("飞花令规则：轮流吟出含令字的语料原句，已用作品不重复；"
+                       "本系统应对句均为语料原句（poem_id 可回源）。"
+                       + ("" if reply else f"语料中含「{ch}」的未用句已尽，此轮认负。"))
+        return out
 
     def intertext_query(self, poem_ref: str = "", text: str = "") -> Dict:
         if poem_ref:

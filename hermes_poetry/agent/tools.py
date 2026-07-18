@@ -89,10 +89,16 @@ class ToolRegistry:
             required=["imagery"])
         add("poetry_metrics", "格律计量（B层）：体裁判定、句式、韵脚位置字。",
             {"poem_ref": {"type": "string"}}, self._metrics, required=["poem_ref"])
-        add("poetry_cipai", "词牌定格（语料归纳）：众数句式与一致率。",
+        add("poetry_cipai", "词牌全景：龙榆生词谱权威层（定格/变格/异名）+ 语料归纳定格 + 全部例词。",
             {"cipai": {"type": "string"}}, self._cipai, required=["cipai"])
-        add("poetry_author", "诗人档案：语料内作品数、高频意象、题材与小传（C层）。",
+        add("poetry_author", "诗人档案（支持字号别名：苏东坡→苏轼）：作品数、高频意象、题材与小传。",
             {"author": {"type": "string"}}, self._author, required=["author"])
+        add("poetry_feihua", "飞花令：校验对方句是否语料实有并回一句含令字的原句应对。",
+            {"char": {"type": "string"}, "user_line": {"type": "string"},
+             "round_no": {"type": "integer"}},
+            lambda char="", user_line="", round_no=0:
+                e.feihua(char, user_line=user_line, round_no=int(round_no or 0)),
+            required=["char"])
         add("poetry_theme", "题材档案：定义、标记词、朝代分布与例证。",
             {"theme": {"type": "string"}},
             lambda theme="": ({"theme_profile": e.theme_profiles[theme]}
@@ -168,19 +174,24 @@ class ToolRegistry:
         return {"metrics": describe(p)}
 
     def _cipai(self, cipai="") -> Dict:
-        from ..textutil import t2s
-        prof = self.engine.cipai_profiles.get(t2s(cipai.strip()))
-        if prof:
-            return {"cipai_profile": prof}
-        cands = [c["cipai"] for c in self.engine.cipai_profiles.values()][:20]
-        return {"error": f"无词牌档案「{cipai}」", "available": cands}
+        r = self.engine.cipai_query(cipai)
+        if r.get("error"):
+            return r
+        # 工具面裁剪：全部例词太长，给前 12 首 + 总数
+        r = dict(r)
+        r["example_poems"], r["n_examples_total"] = r["all_poems"][:12], len(r["all_poems"])
+        r.pop("all_poems", None)
+        return r
 
     def _author(self, author="") -> Dict:
-        from ..textutil import t2s
-        prof = self.engine.author_profiles.get(t2s(author.strip()))
-        if prof:
-            return {"author_profile": prof}
-        return {"error": f"无诗人档案「{author}」（语料内作品≥5首才建档）。"}
+        r = self.engine.resolve_author(author)
+        if r["status"] != "unique":
+            return {"error": f"无诗人档案「{author}」（语料内作品≥5首才建档）。",
+                    "suggestions": r.get("suggestions", [])}
+        out = {"author_profile": self.engine.author_profiles[r["author"]]}
+        if r["via"]:
+            out["resolved_via"] = r["via"]
+        return out
 
     def _external(self, poem_ref="") -> Dict:
         p, err = self.engine.require_unique(poem_ref)
