@@ -10,13 +10,24 @@ from typing import Dict, List, Optional
 
 from ..textutil import cjk_chars, t2s
 
-# 近体标准谱（首句不入韵式；○平 ●仄 ◎可平可仄）
-TEMPLATES = {
-    "五绝": ["◎●○○●", "○○◎●○", "◎○○●●", "◎●●○○"],
-    "七绝": ["◎●◎○○●●", "◎○◎●●○○", "◎○◎●○○●", "◎●○○◎●○"],
-    "五律": ["◎●○○●", "○○◎●○", "◎○○●●", "◎●●○○"] * 2,
-    "七律": ["◎●◎○○●●", "◎○◎●●○○", "◎○◎●○○●", "◎●○○◎●○"] * 2,
-}
+# 近体标准谱四起式（王力《诗词格律》通行口径；○平 ●仄 ◎常规可宽）。
+# ◎位并非无限自由：仍受孤平、三平尾与拗救约束（见 template_note）。
+def _templates_for(genre: str) -> Dict[str, List[str]]:
+    from ..extract.phonology import Phonology
+    char_n = 7 if genre.startswith("七") else 5
+    n_lines = 8 if genre.endswith("律") else 4
+    out = {}
+    for qishi in Phonology._QISHI:
+        lines = Phonology._template_lines(qishi, char_n, n_lines)
+        marked = []
+        for ln in lines:
+            chars = []
+            for j, tone in enumerate(ln):
+                lenient = j not in ([1, 3] + ([5] if char_n == 7 else []) + [char_n - 1])
+                chars.append("◎" if lenient else ("○" if tone == "平" else "●"))
+            marked.append("".join(chars))
+        out[qishi] = marked
+    return out
 
 
 def compose_helper(genre: str = "七绝", rhyme_char: str = "", mood: str = "",
@@ -26,12 +37,16 @@ def compose_helper(genre: str = "七绝", rhyme_char: str = "", mood: str = "",
     engine = engine or get_engine()
     ph = get_phonology()
     genre = t2s(genre.strip()) or "七绝"
+    if genre not in ("五绝", "七绝", "五律", "七律"):
+        genre = "七绝"
     out: Dict = {
         "declaration": "【创作声明】本工具输出为今人拟作辅助，不得伪托古人作品；"
                        "引用的古典例句均逐字回源。",
         "genre": genre,
-        "template": TEMPLATES.get(genre, TEMPLATES["七绝"]),
-        "template_note": "标准谱（首句不入韵式）；○平●仄◎可平可仄，依《广韵》口径",
+        "templates": _templates_for(genre),
+        "template_note": "四起式标准谱（平起/仄起 × 首句入韵/不入韵，王力口径）；"
+                         "○平 ●仄；◎常规可宽但非无限自由——仍受孤平、三平尾、"
+                         "句末与拗救规则约束，草稿请用 check_draft 复核。",
     }
     # 韵部候选：给定韵脚字 → 平水韵部 + 同部常用字（取语料韵伴组交集保常用度）
     if rhyme_char:

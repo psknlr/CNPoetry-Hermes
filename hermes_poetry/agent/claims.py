@@ -60,11 +60,18 @@ class ClaimReport:
 
 
 class ClaimGuard:
+    """v1.5：事实/计量核验走统一 ResolutionResult——同题异作绝不按默认排序
+    取首；歧义时不判违例（宁漏报不误报），如实计入 skipped_ambiguous。"""
+
     def __init__(self, engine):
         self.engine = engine
 
-    def _find_poem(self, title: str):
-        return self.engine.resolve_poem(f"《{title}》")
+    def _resolve(self, title: str) -> Dict:
+        return self.engine.resolve(f"《{title}》")
+
+    def _known_author(self, author: str) -> bool:
+        return (t2s(author) in self.engine.author_profiles
+                or self.engine.rag.has_author(author))
 
     def check(self, answer: str) -> ClaimReport:
         rep = ClaimReport()
@@ -75,13 +82,24 @@ class ClaimGuard:
             self._check_attrib(rep, title, author, m.group(0))
         for m in list(RE_ATTRIB2.finditer(text)):
             author, title = m.group(1), m.group(2)
-            if len(author) >= 2 and t2s(author) in self.engine.author_profiles or \
-                    self.engine.rag._author_index.get(t2s(author)):
+            if len(author) >= 2 and self._known_author(author):
                 self._check_attrib(rep, title, author, m.group(0))
         # ── FactualClaim：朝代 ──
         for m in RE_DYNASTY.finditer(text):
             title, dyn = m.group(1), m.group(2)
-            p = self._find_poem(title)
+            res = self._resolve(title)
+            if res["status"] == "ambiguous":
+                # 全部候选朝代一致才可判；否则跳过（记录）
+                dyns = {c.dynasty for c in res["candidates"]}
+                if len(dyns) == 1 and dyn and dyn not in next(iter(dyns)):
+                    rep.violations.append({
+                        "type": "FactualClaim", "claim": m.group(0),
+                        "problem": f"朝代不符：同题各作均为{next(iter(dyns))}代"})
+                else:
+                    rep.claims.append({"type": "FactualClaim", "claim": m.group(0),
+                                       "skipped_ambiguous": True})
+                continue
+            p = res["selected"]
             if p and dyn and dyn not in p.dynasty and p.dynasty not in dyn:
                 rep.violations.append({
                     "type": "FactualClaim", "claim": m.group(0),
@@ -92,7 +110,12 @@ class ClaimGuard:
         for m in RE_LINECOUNT.finditer(text):
             title, num_s = m.group(1), m.group(2)
             n = _to_int(num_s)
-            p = self._find_poem(title)
+            res = self._resolve(title)
+            if res["status"] == "ambiguous":
+                rep.claims.append({"type": "MetricClaim", "claim": m.group(0),
+                                   "skipped_ambiguous": True})
+                continue
+            p = res["selected"]
             if p and n is not None:
                 actual = (p.metrics or {}).get("line_count")
                 if actual and actual != n:
@@ -122,20 +145,19 @@ class ClaimGuard:
         return rep
 
     def _check_attrib(self, rep: ClaimReport, title: str, author: str, claim: str) -> None:
-        p = self._find_poem(title)
-        if p is None:
+        res = self._resolve(title)
+        cands = res["candidates"]
+        if not cands:
             return
-        if t2s(p.author) != t2s(author):
-            # 同题异作：语料中存在该作者的同题作品则不算违例
-            others = self.engine.rag._title_index.get(t2s(title), [])
-            if not any(t2s(o.author) == t2s(author) for o in others):
-                rep.violations.append({
-                    "type": "FactualClaim", "claim": claim,
-                    "problem": f"作者归属不符：语料记载《{p.title}》为{p.author}作（{p.poem_id}）",
-                    "candidates": [{"poem_id": o.poem_id, "author": o.author}
-                                   for o in others[:3]]})
-                return
-        rep.claims.append({"type": "FactualClaim", "claim": claim, "verified": True})
+        # 声称的作者与任一同题候选一致 → 通过；全部不符才判违例
+        if any(t2s(c.author) == t2s(author) for c in cands):
+            rep.claims.append({"type": "FactualClaim", "claim": claim, "verified": True})
+            return
+        rep.violations.append({
+            "type": "FactualClaim", "claim": claim,
+            "problem": ("作者归属不符：语料同题候选为 "
+                        + "、".join(f"{c.author}（{c.poem_id}）" for c in cands[:3])),
+            "candidates": [{"poem_id": c.poem_id, "author": c.author} for c in cands[:3]]})
 
 
 def annotate_claims(answer: str, rep: ClaimReport) -> str:

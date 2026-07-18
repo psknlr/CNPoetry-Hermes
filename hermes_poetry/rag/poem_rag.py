@@ -58,6 +58,23 @@ class PoemRAG:
                 pass
         return index
 
+    # ── 公共查询接口（外部模块勿触私有索引，便于后续更换存储后端）──
+    def find_by_title(self, title: str) -> List[Poem]:
+        return list(self._title_index.get(t2s((title or "").strip("《》〈〉")), []))
+
+    def find_by_author(self, author: str) -> List[Poem]:
+        return list(self._author_index.get(t2s((author or "").strip()), []))
+
+    def has_author(self, author: str) -> bool:
+        return bool(self._author_index.get(t2s((author or "").strip())))
+
+    def titles_containing(self, title_s: str, prefix_only: bool = False) -> List[Poem]:
+        out = []
+        for ts, ps in self._title_index.items():
+            if ts.startswith(title_s) or (not prefix_only and title_s in ts):
+                out.append(ps[0])
+        return out
+
     # ── 查询解析 ────────────────────────────────────────────────
     def _query_imagery(self, q: str) -> List[str]:
         found, taken = [], [False] * len(q)
