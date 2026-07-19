@@ -128,7 +128,14 @@ class OpenAICompatProvider:
             key = os.environ.get("MINIMAX_API_KEY", "")
             if not key:
                 raise RuntimeError("minimax 后端需要 MINIMAX_API_KEY")
-            base = os.environ.get("MINIMAX_BASE_URL", "https://api.minimax.chat/v1")
+            # 国内/国际双站：MINIMAX_REGION=cn（默认，api.minimaxi.com）
+            # 或 intl/国际/海外（api.minimax.io）；MINIMAX_BASE_URL 显式覆盖优先
+            base = os.environ.get("MINIMAX_BASE_URL", "")
+            if not base:
+                region = os.environ.get("MINIMAX_REGION", "cn").strip().lower()
+                intl = region in ("intl", "international", "overseas", "global",
+                                  "io", "国际", "海外")
+                base = "https://api.minimax.io/v1" if intl else "https://api.minimaxi.com/v1"
             return (f"{base.rstrip('/')}/text/chatcompletion_v2",
                     {"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         base = os.environ.get("HERMES_LLM_BASE_URL", "").rstrip("/")
