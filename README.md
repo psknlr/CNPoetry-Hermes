@@ -197,8 +197,9 @@ export HERMES_LLM_MODEL=<部署名>
 # Poe
 export HERMES_LLM_BACKEND=poe POE_API_KEY=… HERMES_LLM_MODEL=Claude-Sonnet-4.5
 
-# MiniMax
-export HERMES_LLM_BACKEND=minimax MINIMAX_API_KEY=… HERMES_LLM_MODEL=MiniMax-Text-01
+# MiniMax（国内站默认 api.minimaxi.com；国际站 MINIMAX_REGION=intl → api.minimax.io）
+export HERMES_LLM_BACKEND=minimax MINIMAX_API_KEY=… HERMES_LLM_MODEL=MiniMax-M3
+export MINIMAX_REGION=cn            # cn（默认）/ intl；MINIMAX_BASE_URL 显式覆盖优先
 
 # 任意 OpenAI 兼容端点
 export HERMES_LLM_BACKEND=openai_compat HERMES_LLM_BASE_URL=… HERMES_LLM_API_KEY=…

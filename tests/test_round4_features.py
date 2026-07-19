@@ -171,6 +171,25 @@ class TestNativeBackends(unittest.TestCase):
         for b in ("azure", "poe", "minimax", "openai_compat", "litellm"):
             self.assertIn(b, REAL_BACKENDS)
 
+    def test_minimax_region_endpoints(self):
+        import os
+        from hermes_poetry.llm.client import LLMSettings
+        from hermes_poetry.llm.providers import OpenAICompatProvider
+        os.environ["MINIMAX_API_KEY"] = "test"
+        s = LLMSettings(backend="minimax", model="MiniMax-M3")
+        try:
+            for k in ("MINIMAX_REGION", "MINIMAX_BASE_URL"):
+                os.environ.pop(k, None)
+            self.assertIn("api.minimaxi.com", OpenAICompatProvider(s, "minimax").url)  # 国内默认
+            for region in ("intl", "国际", "海外"):
+                os.environ["MINIMAX_REGION"] = region
+                self.assertIn("api.minimax.io", OpenAICompatProvider(s, "minimax").url)
+            os.environ["MINIMAX_BASE_URL"] = "https://proxy.example.com/v1"
+            self.assertIn("proxy.example.com", OpenAICompatProvider(s, "minimax").url)
+        finally:
+            for k in ("MINIMAX_API_KEY", "MINIMAX_REGION", "MINIMAX_BASE_URL"):
+                os.environ.pop(k, None)
+
 
 if __name__ == "__main__":
     unittest.main()
